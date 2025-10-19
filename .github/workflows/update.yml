@@ -1,9 +1,9 @@
-name: Feed Update Every 15 Minutes
+name: Feed Update Every 60 Minutes
 
 on:
   schedule:
     # Every 15 minutes
-    - cron: '*/15 * * * *'
+    - cron: '*/60 * * * *'
   workflow_dispatch: # allows manual trigger
 
 jobs:
