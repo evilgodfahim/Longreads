@@ -95,25 +95,41 @@ for article in feed_articles:
         if title_clean not in REF_TITLES:
             eligible_titles.append((title_clean, article.get("feed_source", "unknown"), lang))
 
-# ===== WRITE OUTPUT XML =====
-rss = ET.Element("rss", version="2.0")
-channel = ET.SubElement(rss, "channel")
-ET.SubElement(channel, "title").text = "Filtered Feed"
-ET.SubElement(channel, "link").text = "https://yourrepo.github.io/"
-ET.SubElement(channel, "description").text = "Filtered articles"
+# ===== WRITE OUTPUT XML (prepend new items) =====
+if os.path.exists(OUTPUT_FILE):
+    existing_tree = ET.parse(OUTPUT_FILE)
+    existing_root = existing_tree.getroot()
+    existing_channel = existing_root.find("channel")
+    existing_items = existing_channel.findall("item")
+else:
+    existing_root = ET.Element("rss", version="2.0")
+    existing_channel = ET.SubElement(existing_root, "channel")
+    ET.SubElement(existing_channel, "title").text = "Filtered Feed"
+    ET.SubElement(existing_channel, "link").text = "https://yourrepo.github.io/"
+    ET.SubElement(existing_channel, "description").text = "Filtered articles"
+    existing_items = []
 
-seen_titles = set()
+# Create a mapping of existing titles to avoid duplicates
+existing_titles = {item.find("title").text for item in existing_items if item.find("title") is not None}
+
+# Create new items (prepend)
+new_items = []
 for a in filtered_articles:
     t = a["title"]
-    if t in seen_titles:
+    if t in existing_titles:
         continue
-    seen_titles.add(t)
-    item = ET.SubElement(channel, "item")
+    item = ET.Element("item")
     ET.SubElement(item, "title").text = t
     ET.SubElement(item, "link").text = a["link"]
     ET.SubElement(item, "pubDate").text = a["published"]
+    new_items.append(item)
 
-ET.ElementTree(rss).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
+# Prepend new items to channel (newest on top)
+for item in reversed(new_items):
+    existing_channel.insert(0, item)
+
+# Write back the combined XML
+ET.ElementTree(existing_root).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
 
 # ===== UPDATE REFERENCE TITLES =====
 if len(REF_TITLES) < REFERENCE_MAX:
@@ -153,4 +169,4 @@ else:
         REF_TITLES.append(t_new)
         with open(REFERENCE_FILE, "w", encoding="utf-8") as f:
             for t in REF_TITLES:
-                f.write(t + "\n")
+                f.write(t + "\n") 
