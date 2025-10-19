@@ -3,7 +3,7 @@ name: Feed Update Every 60 Minutes
 on:
   schedule:
     # Every 15 minutes
-    - cron: '*/60 * * * *'
+    - cron: '0 * * * *'
   workflow_dispatch: # allows manual trigger
 
 jobs:
