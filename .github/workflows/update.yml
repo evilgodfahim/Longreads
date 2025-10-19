@@ -1,7 +1,7 @@
 name: RSS Filter
 
 on:
-  workflow_dispatch:   # <- allows manual trigger
+  workflow_dispatch:   # Manual trigger
   schedule:
     # Every 15 minutes UTC
     - cron: '*/15 * * * *'
@@ -19,14 +19,27 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install dependencies
-        run: |
-          pip install feedparser sentence-transformers scikit-learn
+        run: pip install -r requirements.txt
+
+      - name: Cache SentenceTransformer model
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/torch
+          key: ${{ runner.os }}-torch-model-cache
 
       - name: Run RSS Filter
         run: python filter_feed.py
 
-      - name: Commit & Push filtered.xml
+      - name: Commit & Push filtered.xml and reference_titles.txt
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
