@@ -1,0 +1,36 @@
+name: RSS Filter
+
+on:
+  schedule:
+    # Every 15 minutes UTC
+    - cron: '*/15 * * * *'
+    # Daily at 2 AM UTC → 8 AM BD time
+    - cron: '0 2 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install feedparser sentence-transformers scikit-learn
+
+      - name: Run RSS Filter
+        run: python filter_feed.py
+
+      - name: Commit & Push filtered.xml
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add filtered.xml reference_titles.txt
+          git commit -m "Update filtered feed"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
