@@ -6,6 +6,8 @@ import re
 import random
 import json
 import os
+from email.utils import parsedate_to_datetime
+from datetime import datetime, timezone
 
 # ===== CONFIG =====
 FEEDS_FILE = "feeds.txt"
@@ -36,6 +38,15 @@ def load_last_seen():
 def save_last_seen(last_seen):
     with open(LAST_SEEN_FILE, "w", encoding="utf-8") as f:
         json.dump(last_seen, f, ensure_ascii=False, indent=2)
+
+def parse_pubdate(pubdate_str):
+    """Convert pubDate string to datetime; if invalid, return minimal datetime."""
+    if not pubdate_str:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        return parsedate_to_datetime(pubdate_str)
+    except:
+        return datetime.min.replace(tzinfo=timezone.utc)
 
 # ===== LOAD FEEDS =====
 with open(FEEDS_FILE, "r") as f:
@@ -95,7 +106,7 @@ for article in feed_articles:
         if title_clean not in REF_TITLES:
             eligible_titles.append((title_clean, article.get("feed_source", "unknown"), lang))
 
-# ===== WRITE OUTPUT XML (prepend new items) =====
+# ===== WRITE OUTPUT XML (sorted by pubDate) =====
 if os.path.exists(OUTPUT_FILE):
     existing_tree = ET.parse(OUTPUT_FILE)
     existing_root = existing_tree.getroot()
@@ -109,10 +120,10 @@ else:
     ET.SubElement(existing_channel, "description").text = "Filtered articles"
     existing_items = []
 
-# Create a mapping of existing titles to avoid duplicates
+# Avoid duplicates
 existing_titles = {item.find("title").text for item in existing_items if item.find("title") is not None}
 
-# Create new items (prepend)
+# Create new items
 new_items = []
 for a in filtered_articles:
     t = a["title"]
@@ -124,16 +135,22 @@ for a in filtered_articles:
     ET.SubElement(item, "pubDate").text = a["published"]
     new_items.append(item)
 
-# Prepend new items to channel (newest on top)
-for item in reversed(new_items):
-    existing_channel.insert(0, item)
+# Combine existing + new items, sort by pubDate (newest first)
+all_items = existing_items + new_items
+all_items_sorted = sorted(all_items, key=lambda x: parse_pubdate(x.find("pubDate").text if x.find("pubDate") is not None else ""), reverse=True)
 
-# Write back the combined XML
+# Clear channel and append sorted items
+for item in existing_channel.findall("item"):
+    existing_channel.remove(item)
+
+for item in all_items_sorted:
+    existing_channel.append(item)
+
+# Write XML
 ET.ElementTree(existing_root).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
 
 # ===== UPDATE REFERENCE TITLES =====
 if len(REF_TITLES) < REFERENCE_MAX:
-    # Before 1000: random addition, max 1 Bangla title
     bangla_added = False
     languages_seen = set()
     sources_seen = set()
