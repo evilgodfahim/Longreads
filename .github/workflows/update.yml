@@ -34,7 +34,7 @@ jobs:
 
     - name: Run Feed Script
       run: |
-        python filter_feed_new.py
+        python filter_feed.py
 
     - name: Commit updated files
       run: |
