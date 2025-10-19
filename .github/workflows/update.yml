@@ -1,6 +1,7 @@
 name: RSS Filter
 
 on:
+  workflow_dispatch:   # <- allows manual trigger
   schedule:
     # Every 15 minutes UTC
     - cron: '*/15 * * * *'
