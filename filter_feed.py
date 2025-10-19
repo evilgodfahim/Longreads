@@ -1,101 +1,128 @@
-import feedparser, hashlib, os
+import feedparser
+import hashlib
+import xml.etree.ElementTree as ET
 from datetime import datetime
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-import xml.etree.ElementTree as ET
+import re
+import random
 
-REF_FILE = "reference_titles.txt"
+# ===== CONFIG =====
+FEEDS_FILE = "feeds.txt"
+REFERENCE_FILE = "reference_titles.txt"
+OUTPUT_FILE = "filtered.xml"
+BANGla_THRESHOLD = 0.75  # strict for Bangla
+ENGLISH_THRESHOLD = 0.65  # current/default for English
+MAX_NEW_TITLES = 2
 
-# Load feeds
-with open("feeds.txt") as f:
-    FEEDS = [line.strip() for line in f if line.strip()]
+# ===== UTILS =====
+def clean_title(t):
+    t = t.strip()
+    t = re.sub(r"[“”‘’\"']", "", t)
+    t = re.sub(r"\s+", " ", t)
+    return t
 
-# Load reference titles
-if os.path.exists(REF_FILE):
-    with open(REF_FILE) as f:
-        REF_TITLES = [line.strip() for line in f if line.strip()]
-else:
-    REF_TITLES = []
-
-def hash_text(text):
-    return hashlib.md5(text.encode()).hexdigest()
-
-def fetch_articles():
-    arts = []
-    for url in FEEDS:
-        try:
-            feed = feedparser.parse(url)
-            for e in feed.entries:
-                title = e.get("title", "").strip()
-                link = e.get("link", "")
-                pub = e.get("published", datetime.utcnow().isoformat())
-                if title:
-                    arts.append({"title": title, "link": link, "published": pub})
-        except Exception as ex:
-            print(f"Error reading {url}: {ex}")
-    return arts
-
-def dedupe(arts):
+def dedupe(articles):
     seen, out = set(), []
-    for a in arts:
-        h = hash_text(a["title"])
+    for a in articles:
+        h = hashlib.md5(a["title"].encode()).hexdigest()
         if h not in seen:
             out.append(a)
             seen.add(h)
     return out
 
-def write_rss(arts):
-    rss = ET.Element("rss", version="2.0")
-    ch = ET.SubElement(rss, "channel")
-    ET.SubElement(ch, "title").text = "AI Filtered Editorial Feed"
-    ET.SubElement(ch, "link").text = "https://evilgodfahim.github.io/rss-filter/"
-    ET.SubElement(ch, "description").text = "Auto-filtered editorial and geopolitics content."
+# ===== LOAD FEEDS =====
+with open(FEEDS_FILE, "r") as f:
+    feed_urls = [line.strip() for line in f if line.strip()]
 
-    for a in arts:
-        item = ET.SubElement(ch, "item")
-        ET.SubElement(item, "title").text = a["title"]
-        ET.SubElement(item, "link").text = a["link"]
-        ET.SubElement(item, "pubDate").text = a["published"]
+feed_articles = []
+for url in feed_urls:
+    feed = feedparser.parse(url)
+    for entry in feed.entries:
+        feed_articles.append({
+            "title": entry.title,
+            "link": entry.link,
+            "published": getattr(entry, "published", ""),
+            "feed_source": url
+        })
 
-    tree = ET.ElementTree(rss)
-    tree.write("filtered.xml", encoding="utf-8", xml_declaration=True)
+# ===== LOAD REFERENCE TITLES =====
+with open(REFERENCE_FILE, "r", encoding="utf-8") as f:
+    REF_TITLES = [clean_title(line) for line in f if line.strip()]
 
-def update_reference_titles(new_titles):
-    """Keep up to 1000 titles and add max 2 new ones"""
-    global REF_TITLES
-    new_to_add = [t for t in new_titles if t not in REF_TITLES][:2]
-    if new_to_add:
-        REF_TITLES = (REF_TITLES + new_to_add)[-1000:]
-        with open(REF_FILE, "w") as f:
-            f.write("\n".join(REF_TITLES))
-        print(f"Added {len(new_to_add)} new titles to reference list.")
+# ===== EMBEDDINGS =====
+model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+ref_embeddings = model.encode(REF_TITLES)
 
-def main():
-    print("Fetching feeds...")
-    arts = fetch_articles()
-    arts = dedupe(arts)
-    print(f"Fetched {len(arts)} unique articles")
+# ===== FILTER ARTICLES =====
+filtered_articles = []
+for article in feed_articles:
+    title_clean = clean_title(article["title"])
 
-    if not REF_TITLES:
-        print("No reference titles found — aborting filter.")
-        return
+    # Simple language detection
+    if re.search(r'[\u0980-\u09FF]', title_clean):
+        lang = "bangla"
+        threshold = BANGla_THRESHOLD  # strict
+    else:
+        lang = "english"
+        threshold = ENGLISH_THRESHOLD  # original threshold
 
-    print("Applying AI filter...")
-    model = SentenceTransformer("all-MiniLM-L6-v2")
-    ref_emb = model.encode(REF_TITLES, convert_to_tensor=True)
-    art_titles = [a["title"] for a in arts]
-    art_emb = model.encode(art_titles, convert_to_tensor=True)
+    emb = model.encode([title_clean])
+    sim_scores = cosine_similarity(emb, ref_embeddings)
 
-    scores = cosine_similarity(art_emb, ref_emb).max(axis=1)
-    filtered = [a for a, s in zip(arts, scores) if s > 0.55]
+    if sim_scores.max() >= threshold:
+        filtered_articles.append(article)
 
-    print(f"Filtered down to {len(filtered)} articles")
-    write_rss(filtered)
+# Deduplicate
+filtered_articles = dedupe(filtered_articles)
 
-    # Add top 2 new filtered titles to the reference list
-    if filtered:
-        new_titles = [a["title"] for a in sorted(filtered, key=lambda x: x["published"], reverse=True)]
-        update_reference_titles(new_titles)
+# ===== WRITE OUTPUT XML =====
+rss = ET.Element("rss", version="2.0")
+channel = ET.SubElement(rss, "channel")
+ET.SubElement(channel, "title").text = "Filtered Feed"
+ET.SubElement(channel, "link").text = "https://yourrepo.github.io/"
+ET.SubElement(channel, "description").text = "Filtered articles"
 
-if __name__ == "__main__":
-    main()
+for a in filtered_articles:
+    item = ET.SubElement(channel, "item")
+    ET.SubElement(item, "title").text = a["title"]
+    ET.SubElement(item, "link").text = a["link"]
+    ET.SubElement(item, "pubDate").text = a["published"]
+
+tree = ET.ElementTree(rss)
+tree.write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
+
+# ===== UPDATE REFERENCE TITLES =====
+eligible_titles = []
+languages_seen = set()
+sources_seen = set()
+
+for article in filtered_articles:
+    t = clean_title(article["title"])
+    if t in REF_TITLES:
+        continue
+
+    # Language detection
+    if re.search(r'[\u0980-\u09FF]', t):
+        lang = "bangla"
+    else:
+        lang = "english"
+
+    src = article.get("feed_source", "unknown")
+
+    if lang in languages_seen or src in sources_seen:
+        continue
+
+    eligible_titles.append((t, src, lang))
+    languages_seen.add(lang)
+    sources_seen.add(src)
+
+# Randomly pick up to MAX_NEW_TITLES
+random.shuffle(eligible_titles)
+to_add = eligible_titles[:MAX_NEW_TITLES]
+
+# Append to reference_titles.txt
+if to_add:
+    with open(REFERENCE_FILE, "a", encoding="utf-8") as f:
+        for t, src, lang in to_add:
+            f.write(t + "\n")
