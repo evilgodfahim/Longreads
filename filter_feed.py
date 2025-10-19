@@ -40,11 +40,18 @@ def save_last_seen(last_seen):
         json.dump(last_seen, f, ensure_ascii=False, indent=2)
 
 def parse_pubdate(pubdate_str):
-    """Convert pubDate string to datetime; if invalid, return minimal datetime."""
+    """Convert pubDate string to a timezone-aware datetime in UTC."""
     if not pubdate_str:
         return datetime.min.replace(tzinfo=timezone.utc)
     try:
-        return parsedate_to_datetime(pubdate_str)
+        dt = parsedate_to_datetime(pubdate_str)
+        if dt.tzinfo is None:
+            # Make naive datetime UTC-aware
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            # Convert any timezone-aware datetime to UTC
+            dt = dt.astimezone(timezone.utc)
+        return dt
     except:
         return datetime.min.replace(tzinfo=timezone.utc)
 
