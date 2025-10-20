@@ -2,8 +2,9 @@ name: Feed Update Every 60 Minutes
 
 on:
   schedule:
-    - cron: '45 * * * *'  # runs every hour at 45 minutes past
-  workflow_dispatch:
+    # Runs every hour at 45 minutes past
+    - cron: '45 * * * *'
+  workflow_dispatch: # allows manual trigger
 
 jobs:
   update-feed:
@@ -13,50 +14,46 @@ jobs:
     - name: Checkout Repo
       uses: actions/checkout@v4
 
-    # ===== Cache pip packages =====
+    # ===== CACHE PIP DEPENDENCIES =====
     - name: Cache pip
       uses: actions/cache@v3
       with:
         path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-
 
-    # ===== Set up Python =====
+    # ===== CACHE SENTENCE TRANSFORMER MODEL =====
+    - name: Cache Sentence Transformer model
+      uses: actions/cache@v3
+      with:
+        path: models/paraphrase-MiniLM-L6-v2
+        key: ${{ runner.os }}-st-model-v1
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
-    # ===== Install Dependencies =====
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt huggingface-hub sentence-transformers scikit-learn numpy feedparser python-dateutil
 
-    # ===== Cache the Sentence-Transformers model =====
-    - name: Cache sentence-transformers model
-      uses: actions/cache@v3
-      with:
-        path: models/paraphrase-MiniLM-L6-v2
-        key: ${{ runner.os }}-sentence-transformers-paraphrase-MiniLM-L6-v2
-        restore-keys: |
-          ${{ runner.os }}-sentence-transformers-paraphrase-MiniLM-L6-v2
-
-    # ===== Download the model if missing =====
-    - name: Download Sentence Transformer Model
+    - name: Download Sentence Transformer Model if missing
       run: |
-        python -c "from huggingface_hub import snapshot_download; snapshot_download('sentence-transformers/paraphrase-MiniLM-L6-v2', local_dir='models/paraphrase-MiniLM-L6-v2')"
+        if [ ! -d "models/paraphrase-MiniLM-L6-v2" ]; then
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('sentence-transformers/paraphrase-MiniLM-L6-v2', local_dir='models/paraphrase-MiniLM-L6-v2')"
+        fi
 
-    # ===== Run your feed script =====
     - name: Run Feed Script
       run: python filter_feed.py
 
-    # ===== Commit updated files =====
-    - name: Commit updated files
+    - name: Commit and Push Updates
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add filtered.xml reference_titles.txt
-        git diff --quiet || git commit -m 'Update filtered feed and reference titles'
+        git commit -m "Update filtered feed and reference titles" || echo "No changes to commit"
+        git pull --rebase origin main
         git push
