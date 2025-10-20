@@ -12,7 +12,7 @@ from dateutil import parser
 FEEDS_FILE = "feeds.txt"
 REFERENCE_FILE = "reference_titles.txt"
 OUTPUT_FILE = "filtered.xml"
-ENGLISH_THRESHOLD = 0.65
+ENGLISH_THRESHOLD = 0.50
 MAX_NEW_TITLES = 2
 REFERENCE_MAX = 2000
 MAX_XML_ITEMS = 200
