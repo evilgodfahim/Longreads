@@ -26,11 +26,15 @@ def clean_title(t):
     return t
 
 def detect_language(title):
-    return "english"  # Only English
+    return "english"
 
-def parse_safe(date_str):
+def parse_safe_utc(date_str):
     try:
-        return parser.parse(date_str)
+        dt = parser.parse(date_str)
+        # convert aware datetime to naive UTC
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(tz=None).replace(tzinfo=None)
+        return dt
     except Exception:
         return datetime(1970, 1, 1)
 
@@ -83,15 +87,14 @@ cutoff = datetime.utcnow() - timedelta(hours=CUT_OFF_HOURS)
 recent_articles = []
 
 for a in filtered_articles:
-    pub_str = a.get("published", "")
-    pub_dt = parse_safe(pub_str)
+    pub_dt = parse_safe_utc(a.get("published", ""))
     if pub_dt > cutoff:
         recent_articles.append(a)
 
 filtered_articles = recent_articles
 
 # ===== SORT BY PUBLISH DATE DESC =====
-filtered_articles.sort(key=lambda x: parse_safe(x.get("published", "")), reverse=True)
+filtered_articles.sort(key=lambda x: parse_safe_utc(x.get("published", "")), reverse=True)
 
 # ===== LOAD EXISTING XML =====
 if os.path.exists(OUTPUT_FILE):
@@ -113,7 +116,7 @@ for item in channel.findall("item"):
         existing_titles.add(t.text)
 
 # ===== ADD NEW ITEMS AT THE TOP =====
-for a in reversed(filtered_articles):  # reversed because insert at 0 keeps newest first
+for a in reversed(filtered_articles):  # reversed so newest ends up at top
     t = a["title"]
     if t in existing_titles:
         continue
@@ -140,4 +143,4 @@ if len(REF_TITLES) < REFERENCE_MAX:
     if to_add:
         with open(REFERENCE_FILE, "a", encoding="utf-8") as f:
             for t, _, _ in to_add:
-                f.write(t + "\n")
+                f.write(t + "\n") 
