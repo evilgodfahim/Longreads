@@ -1,4 +1,6 @@
-feedparser
-sentence-transformers
-scikit-learn
-numpy 
+feedparser>=6.0.10
+sentence-transformers>=2.2.2
+scikit-learn>=1.2.2
+numpy>=1.25.0
+torch>=2.2.0
+transformers>=4.40.0
