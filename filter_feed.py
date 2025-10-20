@@ -12,7 +12,7 @@ REFERENCE_FILE = "reference_titles.txt"
 OUTPUT_FILE = "filtered.xml"
 ENGLISH_THRESHOLD = 0.65
 MAX_NEW_TITLES = 2
-REFERENCE_MAX = 1000
+REFERENCE_MAX = 2000
 
 # ===== UTILS =====
 def clean_title(t):
