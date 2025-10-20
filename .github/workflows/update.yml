@@ -22,17 +22,19 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
 
+    # ===== Set up Python =====
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
+    # ===== Install Dependencies =====
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt huggingface-hub sentence-transformers scikit-learn numpy feedparser
+        pip install -r requirements.txt huggingface-hub sentence-transformers scikit-learn numpy feedparser python-dateutil
 
-    # ===== Cache the Hugging Face model =====
+    # ===== Cache the Sentence-Transformers model =====
     - name: Cache sentence-transformers model
       uses: actions/cache@v3
       with:
@@ -41,13 +43,16 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-sentence-transformers-paraphrase-MiniLM-L6-v2
 
+    # ===== Download the model if missing =====
     - name: Download Sentence Transformer Model
       run: |
         python -c "from huggingface_hub import snapshot_download; snapshot_download('sentence-transformers/paraphrase-MiniLM-L6-v2', local_dir='models/paraphrase-MiniLM-L6-v2')"
 
+    # ===== Run your feed script =====
     - name: Run Feed Script
       run: python filter_feed.py
 
+    # ===== Commit updated files =====
     - name: Commit updated files
       run: |
         git config user.name "github-actions[bot]"
