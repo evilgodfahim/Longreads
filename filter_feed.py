@@ -15,8 +15,8 @@ OUTPUT_FILE = "filtered.xml"
 ENGLISH_THRESHOLD = 0.65
 MAX_NEW_TITLES = 2
 REFERENCE_MAX = 2000
-MAX_XML_ITEMS = 200  # limit total items in XML
-CUT_OFF_HOURS = 36   # last 36 hours
+MAX_XML_ITEMS = 200
+CUT_OFF_HOURS = 36
 
 # ===== UTILS =====
 def clean_title(t):
@@ -28,15 +28,18 @@ def clean_title(t):
 def detect_language(title):
     return "english"
 
-def parse_safe_utc(date_str):
+def pubdate_to_minutes(pubdate_str):
+    """
+    Convert any pubDate string to a UTC timestamp in minutes.
+    Handles date-only, datetime with timezone, and malformed strings.
+    """
     try:
-        dt = parser.parse(date_str)
-        # convert aware datetime to naive UTC
+        dt = parser.parse(pubdate_str, fuzzy=True)
         if dt.tzinfo is not None:
             dt = dt.astimezone(tz=None).replace(tzinfo=None)
-        return dt
+        return int(dt.timestamp() // 60)
     except Exception:
-        return datetime(1970, 1, 1)
+        return 0  # very old value for invalid dates
 
 # ===== LOAD FEEDS =====
 with open(FEEDS_FILE, "r") as f:
@@ -46,6 +49,8 @@ feed_articles = []
 for url in feed_urls:
     feed = feedparser.parse(url)
     for entry in feed.entries:
+        if not getattr(entry, "title", None) or not getattr(entry, "link", None):
+            continue
         feed_articles.append({
             "title": entry.title,
             "link": entry.link,
@@ -82,19 +87,18 @@ for article in feed_articles:
         if title_clean not in REF_TITLES:
             eligible_titles.append((title_clean, article.get("feed_source", "unknown"), "english"))
 
-# ===== FILTER BY LAST 36 HOURS =====
-cutoff = datetime.utcnow() - timedelta(hours=CUT_OFF_HOURS)
+# ===== FILTER BY LAST 36 HOURS USING MINUTES =====
+cutoff_minutes = int((datetime.utcnow() - timedelta(hours=CUT_OFF_HOURS)).timestamp() // 60)
 recent_articles = []
-
 for a in filtered_articles:
-    pub_dt = parse_safe_utc(a.get("published", ""))
-    if pub_dt > cutoff:
+    minutes = pubdate_to_minutes(a.get("published", ""))
+    if minutes > cutoff_minutes:
         recent_articles.append(a)
 
 filtered_articles = recent_articles
 
 # ===== SORT BY PUBLISH DATE DESC =====
-filtered_articles.sort(key=lambda x: parse_safe_utc(x.get("published", "")), reverse=True)
+filtered_articles.sort(key=lambda x: pubdate_to_minutes(x.get("published", "")), reverse=True)
 
 # ===== LOAD EXISTING XML =====
 if os.path.exists(OUTPUT_FILE):
@@ -143,4 +147,4 @@ if len(REF_TITLES) < REFERENCE_MAX:
     if to_add:
         with open(REFERENCE_FILE, "a", encoding="utf-8") as f:
             for t, _, _ in to_add:
-                f.write(t + "\n") 
+                f.write(t + "\n")
