@@ -5,6 +5,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 import re
 import random
 import os
+from datetime import datetime, timedelta
+from dateutil import parser
 
 # ===== CONFIG =====
 FEEDS_FILE = "feeds.txt"
@@ -13,6 +15,8 @@ OUTPUT_FILE = "filtered.xml"
 ENGLISH_THRESHOLD = 0.65
 MAX_NEW_TITLES = 2
 REFERENCE_MAX = 2000
+MAX_XML_ITEMS = 200  # limit total items in XML
+CUT_OFF_HOURS = 36   # last 36 hours
 
 # ===== UTILS =====
 def clean_title(t):
@@ -22,7 +26,13 @@ def clean_title(t):
     return t
 
 def detect_language(title):
-    return "english"  # Only English now
+    return "english"  # Only English
+
+def parse_safe(date_str):
+    try:
+        return parser.parse(date_str)
+    except Exception:
+        return datetime(1970, 1, 1)
 
 # ===== LOAD FEEDS =====
 with open(FEEDS_FILE, "r") as f:
@@ -54,40 +64,74 @@ if not os.path.exists(MODEL_PATH):
 model = SentenceTransformer(MODEL_PATH)
 ref_embeddings = model.encode(REF_TITLES)
 
-# ===== FILTER ARTICLES =====
+# ===== FILTER ARTICLES BY SIMILARITY =====
 filtered_articles = []
 eligible_titles = []
 
 for article in feed_articles:
     title_clean = clean_title(article["title"])
-    threshold = ENGLISH_THRESHOLD
     emb = model.encode([title_clean])
     sim_scores = cosine_similarity(emb, ref_embeddings) if ref_embeddings.size else []
 
-    if len(sim_scores) == 0 or sim_scores.max() >= threshold:
+    if len(sim_scores) == 0 or sim_scores.max() >= ENGLISH_THRESHOLD:
         filtered_articles.append(article)
         if title_clean not in REF_TITLES:
             eligible_titles.append((title_clean, article.get("feed_source", "unknown"), "english"))
 
-# ===== WRITE OUTPUT XML =====
-rss = ET.Element("rss", version="2.0")
-channel = ET.SubElement(rss, "channel")
-ET.SubElement(channel, "title").text = "Filtered Feed"
-ET.SubElement(channel, "link").text = "https://yourrepo.github.io/"
-ET.SubElement(channel, "description").text = "Filtered articles"
+# ===== FILTER BY LAST 36 HOURS =====
+cutoff = datetime.utcnow() - timedelta(hours=CUT_OFF_HOURS)
+recent_articles = []
 
-seen_titles = set()
 for a in filtered_articles:
+    pub_str = a.get("published", "")
+    pub_dt = parse_safe(pub_str)
+    if pub_dt > cutoff:
+        recent_articles.append(a)
+
+filtered_articles = recent_articles
+
+# ===== SORT BY PUBLISH DATE DESC =====
+filtered_articles.sort(key=lambda x: parse_safe(x.get("published", "")), reverse=True)
+
+# ===== LOAD EXISTING XML =====
+if os.path.exists(OUTPUT_FILE):
+    tree = ET.parse(OUTPUT_FILE)
+    root = tree.getroot()
+    channel = root.find("channel")
+else:
+    root = ET.Element("rss", version="2.0")
+    channel = ET.SubElement(root, "channel")
+    ET.SubElement(channel, "title").text = "Filtered Feed"
+    ET.SubElement(channel, "link").text = "https://yourrepo.github.io/"
+    ET.SubElement(channel, "description").text = "Filtered articles"
+
+# ===== BUILD EXISTING TITLES SET =====
+existing_titles = set()
+for item in channel.findall("item"):
+    t = item.find("title")
+    if t is not None:
+        existing_titles.add(t.text)
+
+# ===== ADD NEW ITEMS AT THE TOP =====
+for a in reversed(filtered_articles):  # reversed because insert at 0 keeps newest first
     t = a["title"]
-    if t in seen_titles:
+    if t in existing_titles:
         continue
-    seen_titles.add(t)
-    item = ET.SubElement(channel, "item")
+    item = ET.Element("item")
     ET.SubElement(item, "title").text = t
     ET.SubElement(item, "link").text = a["link"]
     ET.SubElement(item, "pubDate").text = a["published"]
+    channel.insert(0, item)
+    existing_titles.add(t)
 
-ET.ElementTree(rss).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
+# ===== LIMIT XML ITEMS =====
+all_items = channel.findall("item")
+if len(all_items) > MAX_XML_ITEMS:
+    for item in all_items[MAX_XML_ITEMS:]:
+        channel.remove(item)
+
+# ===== WRITE XML =====
+ET.ElementTree(root).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
 
 # ===== UPDATE REFERENCE TITLES =====
 if len(REF_TITLES) < REFERENCE_MAX:
