@@ -2,7 +2,7 @@ name: Feed Update Every 60 Minutes
 
 on:
   schedule:
-    # Every 15 minutes
+    # Runs every hour at 45 minutes past
     - cron: '45 * * * *'
   workflow_dispatch: # allows manual trigger
 
@@ -40,6 +40,6 @@ jobs:
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add last_seen.json filtered.xml reference_titles.txt
-        git commit -m "Update feed and last_seen.json" || echo "No changes to commit"
+        git add filtered.xml reference_titles.txt
+        git commit -m "Update filtered feed and reference titles" || echo "No changes to commit"
         git push
