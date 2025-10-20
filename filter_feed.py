@@ -62,7 +62,7 @@ with open(REFERENCE_FILE, "r", encoding="utf-8") as f:
     REF_TITLES = [clean_title(line) for line in f if line.strip()]
 
 # ===== EMBEDDINGS =====
-model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+model = SentenceTransformer("paraphrase-MiniLM-L6-v2")
 ref_embeddings = model.encode(REF_TITLES)
 
 # ===== FILTER ARTICLES =====
