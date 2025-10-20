@@ -12,8 +12,8 @@ REFERENCE_FILE = "reference_titles.txt"
 OUTPUT_FILE = "filtered.xml"
 ENGLISH_THRESHOLD = 0.65
 MAX_NEW_TITLES = 2
-REFERENCE_MAX = 1000  # max total reference titles
-MAX_AGE_HOURS = 36    # only add articles within 36 hours
+REFERENCE_MAX = 1000
+MAX_AGE_HOURS = 36
 
 # ===== UTILS =====
 def clean_title(t):
@@ -95,7 +95,6 @@ ET.ElementTree(rss).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
 
 # ===== UPDATE REFERENCE TITLES =====
 if len(REF_TITLES) < REFERENCE_MAX:
-    languages_seen = set()
     sources_seen = set()
     random.shuffle(eligible_titles)
     to_add = []
@@ -110,4 +109,4 @@ if len(REF_TITLES) < REFERENCE_MAX:
     if to_add:
         with open(REFERENCE_FILE, "a", encoding="utf-8") as f:
             for t, _ in to_add:
-                f.write(t + "\n") 
+                f.write(t + "\n")
