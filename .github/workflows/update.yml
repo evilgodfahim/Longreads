@@ -2,9 +2,8 @@ name: Feed Update Every 60 Minutes
 
 on:
   schedule:
-    # Runs every hour at 45 minutes past
-    - cron: '45 * * * *'
-  workflow_dispatch: # allows manual trigger
+    - cron: '45 * * * *'   # Runs every hour at 45 minutes past
+  workflow_dispatch:
 
 jobs:
   update-feed:
@@ -26,6 +25,12 @@ jobs:
         key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-
+
+    - name: Cache SentenceTransformer model
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/torch/sentence_transformers
+        key: ${{ runner.os }}-st-model
 
     - name: Install Dependencies
       run: |
