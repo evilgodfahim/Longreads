@@ -15,7 +15,7 @@ OUTPUT_FILE = "filtered.xml"
 ENGLISH_THRESHOLD = 0.48   # lowered slightly to catch more phrasing variety
 MAX_NEW_TITLES = 2
 REFERENCE_MAX = 2000
-MAX_XML_ITEMS = 200
+MAX_XML_ITEMS = 500
 CUT_OFF_HOURS = 36
 
 # ===== UTILS =====
