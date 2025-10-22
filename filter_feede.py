@@ -13,7 +13,7 @@ FEEDS_FILE = "feeds.txt"
 REFERENCE_FILE = "reference_titles.txt"
 OUTPUT_FILE = "filtered.xml"
 TEMP_FILE = "temp.xml"
-ENGLISH_THRESHOLD = 0.50
+ENGLISH_THRESHOLD = 0.60   # 🔹 Slightly raised for better precision with stronger model
 MAX_NEW_TITLES = 2
 REFERENCE_MAX = 2000
 MAX_XML_ITEMS = 200
@@ -66,13 +66,14 @@ if os.path.exists(REFERENCE_FILE):
 else:
     REF_TITLES = []
 
-# ===== LOAD LOCAL MODEL =====
-MODEL_PATH = "models/paraphrase-MiniLM-L6-v2"
+# ===== LOAD HIGH-QUALITY SEMANTIC MODEL =====
+# 🔹 More accurate than MiniLM: deeper and contextually stronger.
+MODEL_PATH = "models/all-mpnet-base-v2"
 if not os.path.exists(MODEL_PATH):
     raise FileNotFoundError(f"Model not found at {MODEL_PATH}. Run workflow to download first.")
 
 model = SentenceTransformer(MODEL_PATH)
-ref_embeddings = model.encode(REF_TITLES)
+ref_embeddings = model.encode(REF_TITLES, normalize_embeddings=True)
 
 # ===== FILTER ARTICLES BY SIMILARITY =====
 filtered_articles = []
@@ -80,7 +81,7 @@ eligible_titles = []
 
 for article in feed_articles:
     title_clean = clean_title(article["title"])
-    emb = model.encode([title_clean])
+    emb = model.encode([title_clean], normalize_embeddings=True)
     sim_scores = cosine_similarity(emb, ref_embeddings) if ref_embeddings.size else []
 
     if len(sim_scores) == 0 or sim_scores.max() >= ENGLISH_THRESHOLD:
