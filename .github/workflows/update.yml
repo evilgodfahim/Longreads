@@ -24,7 +24,7 @@ jobs:
     - name: Cache Sentence Transformer model
       uses: actions/cache@v3
       with:
-        path: models/all-mpnet-base-v2
+        path: models/bge-base-en-v1.5
         key: ${{ runner.os }}-st-model-v2
 
     - name: Set up Python
@@ -39,8 +39,8 @@ jobs:
 
     - name: Download Sentence Transformer Model if missing
       run: |
-        if [ ! -d "models/all-mpnet-base-v2" ]; then
-          python -c "from huggingface_hub import snapshot_download; snapshot_download('sentence-transformers/all-mpnet-base-v2', local_dir='models/all-mpnet-base-v2')"
+        if [ ! -d "models/bge-base-en-v1.5" ]; then
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('BAAI/bge-base-en-v1.5', local_dir='models/bge-base-en-v1.5')"
         fi
 
     - name: Run Feed Script
