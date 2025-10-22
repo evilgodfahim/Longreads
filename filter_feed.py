@@ -176,7 +176,7 @@ else:
     REF_TITLES = []
 
 # ===== LOAD LOCAL MODEL =====
-MODEL_PATH = "models/bge-base-en-v1.5"
+MODEL_PATH = "models/all-mpnet-base-v2"
 if not os.path.exists(MODEL_PATH):
     raise FileNotFoundError(f"Model not found at {MODEL_PATH}. Run workflow to download first.")
 
