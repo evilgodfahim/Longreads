@@ -2,9 +2,8 @@ name: Feed Update Every 60 Minutes
 
 on:
   schedule:
-    # Runs every hour at 45 minutes past
-    - cron: '45 * * * *'
-  workflow_dispatch: # allows manual trigger
+    - cron: '45 * * * *'  # Runs every hour at 45 minutes past
+  workflow_dispatch:
 
 jobs:
   update-feed:
@@ -14,7 +13,6 @@ jobs:
     - name: Checkout Repo
       uses: actions/checkout@v4
 
-    # ===== CACHE PIP DEPENDENCIES =====
     - name: Cache pip
       uses: actions/cache@v3
       with:
@@ -23,12 +21,11 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
 
-    # ===== CACHE SENTENCE TRANSFORMER MODEL =====
     - name: Cache Sentence Transformer model
       uses: actions/cache@v3
       with:
-        path: models/paraphrase-MiniLM-L6-v2
-        key: ${{ runner.os }}-st-model-v1
+        path: models/all-mpnet-base-v2
+        key: ${{ runner.os }}-st-model-v2
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -42,8 +39,8 @@ jobs:
 
     - name: Download Sentence Transformer Model if missing
       run: |
-        if [ ! -d "models/paraphrase-MiniLM-L6-v2" ]; then
-          python -c "from huggingface_hub import snapshot_download; snapshot_download('sentence-transformers/paraphrase-MiniLM-L6-v2', local_dir='models/paraphrase-MiniLM-L6-v2')"
+        if [ ! -d "models/all-mpnet-base-v2" ]; then
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('sentence-transformers/all-mpnet-base-v2', local_dir='models/all-mpnet-base-v2')"
         fi
 
     - name: Run Feed Script
