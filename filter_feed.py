@@ -16,7 +16,7 @@ TEMP_FILE = "temp.xml"
 ENGLISH_THRESHOLD = 0.60   # 🔹 Slightly raised for better precision with stronger model
 MAX_NEW_TITLES = 2
 REFERENCE_MAX = 2000
-MAX_XML_ITEMS = 200
+MAX_XML_ITEMS = 500
 CUT_OFF_HOURS = 36
 
 # ===== UTILS =====
