@@ -3,7 +3,6 @@ import xml.etree.ElementTree as ET
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import re
-import random
 import os
 from datetime import datetime, timedelta
 from dateutil import parser
@@ -13,8 +12,6 @@ FEEDS_FILE = "feeds.txt"
 REFERENCE_FILE = "reference_titles.txt"
 OUTPUT_FILE = "filtered.xml"
 ENGLISH_THRESHOLD = 0.60   # lowered slightly to catch more phrasing variety
-MAX_NEW_TITLES = 2
-REFERENCE_MAX = 2000
 MAX_XML_ITEMS = 500
 CUT_OFF_HOURS = 36
 
@@ -33,7 +30,7 @@ def calculate_analytical_score(title):
     """Score titles based on crisis/analysis/geopolitical patterns."""
     score = 0
     title_lower = title.lower()
-    
+
     # CRISIS/CONFLICT INDICATORS (very strong signals)
     crisis_terms = [
         'war', 'conflict', 'crisis', 'collapse', 'violence', 'attack', 'strikes',
@@ -46,16 +43,16 @@ def calculate_analytical_score(title):
     ]
     crisis_count = sum(1 for term in crisis_terms if term in title_lower)
     score += min(crisis_count * 2, 6)  # Max 6 points from crisis terms
-    
+
     # GEOPOLITICAL RELATIONS (country-country interactions)
     relation_patterns = ['-', ' v ', ' vs ', ' versus ', ' and ', ' with ']
     if any(pattern in title_lower for pattern in relation_patterns):
         score += 2
-    
+
     # POSSESSIVE STRUCTURES (country's/region's X)
     if "'s " in title or "'" in title:
         score += 2
-    
+
     # ANALYTICAL QUESTION WORDS
     question_starters = [
         'why ', 'how ', 'what ', 'can ', 'will ', 'should ', 'is ', 'are ', 
@@ -63,7 +60,7 @@ def calculate_analytical_score(title):
     ]
     if any(title_lower.startswith(q) for q in question_starters):
         score += 2
-    
+
     # GEOPOLITICAL/ECONOMIC KEYWORDS
     geo_terms = [
         'economic', 'trade', 'debt', 'inflation', 'currency', 'military', 'nuclear',
@@ -79,7 +76,7 @@ def calculate_analytical_score(title):
     ]
     geo_count = sum(1 for term in geo_terms if term in title_lower)
     score += min(geo_count, 3)  # Max 3 points from geo terms
-    
+
     # OUTCOME/IMPACT LANGUAGE (action verbs)
     outcome_terms = [
         'faces', 'threatens', 'undermines', 'deepens', 'escalates', 'intensifies',
@@ -91,7 +88,7 @@ def calculate_analytical_score(title):
     ]
     if any(term in title_lower for term in outcome_terms):
         score += 1
-    
+
     # EXPLANATORY STRUCTURES
     explanatory = [
         'reveals', 'shows', 'exposes', 'means for', 'means to', 'impact on', 'impact of',
@@ -101,7 +98,7 @@ def calculate_analytical_score(title):
     ]
     if any(exp in title_lower for exp in explanatory):
         score += 1
-    
+
     # COMPARATIVE/DILEMMA STRUCTURES
     comparative = [
         'between', 'versus', 'against', 'compared to', 'the paradox', 
@@ -109,7 +106,7 @@ def calculate_analytical_score(title):
     ]
     if any(comp in title_lower for comp in comparative):
         score += 1
-    
+
     # FUTURE/PREDICTIVE LANGUAGE
     future = [
         'future of', 'will ', 'could ', 'may ', 'might ', 'outlook', 'prospects',
@@ -117,7 +114,7 @@ def calculate_analytical_score(title):
     ]
     if any(fut in title_lower for fut in future):
         score += 1
-    
+
     # REGIONAL/COUNTRY NAMES (indicates geopolitical focus)
     regions = [
         'middle east', 'south asia', 'east asia', 'southeast asia', 'central asia',
@@ -131,7 +128,7 @@ def calculate_analytical_score(title):
     ]
     if any(region in title_lower for region in regions):
         score += 1
-    
+
     # NEGATIVE INDICATORS (reduce score for pure news/events)
     news_indicators = [
         'announces', 'launches', 'opens', 'celebrates', 'wins award', 'ceremony',
@@ -142,7 +139,7 @@ def calculate_analytical_score(title):
     ]
     if any(indicator in title_lower for indicator in news_indicators):
         score -= 3
-    
+
     return score
 
 def pubdate_to_minutes(pubdate_str):
@@ -188,14 +185,13 @@ ref_embeddings = model.encode(REF_TITLES) if REF_TITLES else None
 
 # ===== FILTER ARTICLES BY HYBRID SCORING =====
 filtered_articles = []
-eligible_titles = []
 
 for article in feed_articles:
     title_clean = clean_title(article["title"])
-    
+
     # Calculate pattern score
     pattern_score = calculate_analytical_score(title_clean)
-    
+
     # Calculate similarity score
     if ref_embeddings is not None and ref_embeddings.size > 0:
         emb = model.encode([title_clean])
@@ -203,7 +199,7 @@ for article in feed_articles:
         max_similarity = sim_scores.max()
     else:
         max_similarity = 0.0
-    
+
     # HYBRID DECISION LOGIC
     accept = False
     if max_similarity >= ENGLISH_THRESHOLD:
@@ -212,11 +208,9 @@ for article in feed_articles:
         accept = True
     elif pattern_score >= 5 and max_similarity >= 0.38:
         accept = True
-    
+
     if accept:
         filtered_articles.append(article)
-        if title_clean not in REF_TITLES:
-            eligible_titles.append((title_clean, article.get("feed_source", "unknown"), "english"))
 
 # ===== FILTER BY LAST 36 HOURS =====
 cutoff_minutes = int((datetime.utcnow() - timedelta(hours=CUT_OFF_HOURS)).timestamp() // 60)
@@ -270,12 +264,3 @@ if len(all_items) > MAX_XML_ITEMS:
 
 # ===== WRITE XML =====
 ET.ElementTree(root).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
-
-# ===== UPDATE REFERENCE TITLES =====
-if len(REF_TITLES) < REFERENCE_MAX:
-    random.shuffle(eligible_titles)
-    to_add = eligible_titles[:MAX_NEW_TITLES]
-    if to_add:
-        with open(REFERENCE_FILE, "a", encoding="utf-8") as f:
-            for t, _, _ in to_add:
-                f.write(t + "\n")
