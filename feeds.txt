@@ -28,3 +28,4 @@ https://evilgodfahim.github.io/nytop/combined.xml
 https://theconversation.com/global/home-page.atom
 https://politepol.com/fd/R39To2fYhqqO.xml
 https://evilgodfahim.github.io/lemonde/combined.xml
+https://eurasiantimes.com/feed/
