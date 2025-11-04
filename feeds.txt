@@ -64,3 +64,10 @@ https://www.chathamhouse.org/path/whatsnew.xml
 https://www.politico.eu/section/foreign-affairs/feed/
 https://www.moonofalabama.org/atom.xml
 https://southfront.press/feed/
+https://geopoliticaleconomy.com/feed/https://geopoliticsreport.substack.com/feed
+https://www.modadgeopolitics.com/feed
+https://geopoliticsagi.substack.com/feed
+https://katehon.com/en/rss.xml
+https://lansinginstitute.org/category/geopolitics/feed/
+https://www.newgeopolitics.org/feed/
+https://thegeopolitics.com/feed/
