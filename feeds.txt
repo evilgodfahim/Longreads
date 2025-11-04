@@ -19,7 +19,6 @@ https://zeihan.com/feed/
 https://politepol.com/fd/ELc5hcluIkDO.xml
 https://original.antiwar.com/feed/
 https://www.atlanticcouncil.org/feed/
-https://www.lowyinstitute.org/the-interpreter/rss.xml
 https://warontherocks.com/feed/
 https://www.thehindu.com/opinion/editorial/?service=rss
 https://politepol.com/fd/aCEp2lWYu3Jn.xml
@@ -31,7 +30,6 @@ https://evilgodfahim.github.io/lemonde/combined.xml
 https://eurasiantimes.com/feed/
 http://www.irinnews.org/rss/conflict.xml
 https://www.bloomberg.com/politics/feeds/site.xml
-https://www.youtube.com/feeds/videos.xml?channel_id=UCDeDd29TrRzAkSKXBCtGhxA
 https://saiia.org.za/thematic-area/foreign-policy/feed/
 https://www.vtforeignpolicy.com/feed/
 https://medium.com/feed/tag/foreign-policy
@@ -40,7 +38,8 @@ https://theconversation.com/us/topics/geopolitics-4230/articles.atom
 https://geopoliticaleconomy.substack.com/feed
 https://www.newgeopolitics.org/feed/
 https://ipdefenseforum.com/feed/
-https://www.nytimes.com/svc/collections/v1/publish/http://www.nytimes.com/topic/subject/international-relations/rss.xml
+https://www.nytimes.com/svc/collections/v1/publish/
+http://www.nytimes.com/topic/subject/international-relations/rss.xml
 http://www.irinnews.org/irin.xml
 https://feeds.feedburner.com/LongWarJournalSiteWide
 https://gulfif.org/feed/
