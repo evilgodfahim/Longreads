@@ -11,7 +11,7 @@ from dateutil import parser
 FEEDS_FILE = "feeds.txt"
 REFERENCE_FILE = "reference_titles.txt"
 OUTPUT_FILE = "filtered.xml"
-ENGLISH_THRESHOLD = 0.60   # lowered slightly to catch more phrasing variety
+ENGLISH_THRESHOLD = 0.50   # slightly stricter semantic threshold
 MAX_XML_ITEMS = 500
 CUT_OFF_HOURS = 36
 
@@ -42,14 +42,14 @@ def calculate_analytical_score(title):
         'civil war', 'rebels', 'armed group'
     ]
     crisis_count = sum(1 for term in crisis_terms if term in title_lower)
-    score += min(crisis_count * 2, 6)  # Max 6 points from crisis terms
+    score += min(crisis_count * 2, 6)
 
-    # GEOPOLITICAL RELATIONS (country-country interactions)
+    # GEOPOLITICAL RELATIONS
     relation_patterns = ['-', ' v ', ' vs ', ' versus ', ' and ', ' with ']
     if any(pattern in title_lower for pattern in relation_patterns):
         score += 2
 
-    # POSSESSIVE STRUCTURES (country's/region's X)
+    # POSSESSIVE STRUCTURES
     if "'s " in title or "'" in title:
         score += 2
 
@@ -75,9 +75,9 @@ def calculate_analytical_score(title):
         'arms race', 'militarization', 'deterrent', 'security council'
     ]
     geo_count = sum(1 for term in geo_terms if term in title_lower)
-    score += min(geo_count, 3)  # Max 3 points from geo terms
+    score += min(geo_count, 3)
 
-    # OUTCOME/IMPACT LANGUAGE (action verbs)
+    # OUTCOME/IMPACT LANGUAGE
     outcome_terms = [
         'faces', 'threatens', 'undermines', 'deepens', 'escalates', 'intensifies',
         'worsens', 'persists', 'continues', 'remains', 'struggles', 'fails',
@@ -115,7 +115,7 @@ def calculate_analytical_score(title):
     if any(fut in title_lower for fut in future):
         score += 1
 
-    # REGIONAL/COUNTRY NAMES (indicates geopolitical focus)
+    # REGIONAL/COUNTRY NAMES
     regions = [
         'middle east', 'south asia', 'east asia', 'southeast asia', 'central asia',
         'africa', 'europe', 'balkans', 'sahel', 'caucasus', 'latin america',
@@ -129,7 +129,7 @@ def calculate_analytical_score(title):
     if any(region in title_lower for region in regions):
         score += 1
 
-    # NEGATIVE INDICATORS (reduce score for pure news/events)
+    # NEGATIVE INDICATORS
     news_indicators = [
         'announces', 'launches', 'opens', 'celebrates', 'wins award', 'ceremony',
         'appointed today', 'signs deal today', 'breaks record', 'new product',
@@ -188,11 +188,8 @@ filtered_articles = []
 
 for article in feed_articles:
     title_clean = clean_title(article["title"])
-
-    # Calculate pattern score
     pattern_score = calculate_analytical_score(title_clean)
 
-    # Calculate similarity score
     if ref_embeddings is not None and ref_embeddings.size > 0:
         emb = model.encode([title_clean])
         sim_scores = cosine_similarity(emb, ref_embeddings)
@@ -200,13 +197,15 @@ for article in feed_articles:
     else:
         max_similarity = 0.0
 
-    # HYBRID DECISION LOGIC
+    # Adaptive hybrid logic
     accept = False
     if max_similarity >= ENGLISH_THRESHOLD:
         accept = True
     elif pattern_score >= 7 and max_similarity >= 0.33:
         accept = True
     elif pattern_score >= 5 and max_similarity >= 0.38:
+        accept = True
+    elif pattern_score >= 8 and max_similarity >= 0.30:  # adaptive rule for vogue titles
         accept = True
 
     if accept:
