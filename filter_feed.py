@@ -11,7 +11,7 @@ from dateutil import parser
 FEEDS_FILE = "feeds.txt"
 REFERENCE_FILE = "reference_titles.txt"
 OUTPUT_FILE = "filtered.xml"
-ENGLISH_THRESHOLD = 0.50   # slightly stricter semantic threshold
+ENGLISH_THRESHOLD = 0.60   # slightly stricter semantic threshold
 MAX_XML_ITEMS = 500
 CUT_OFF_HOURS = 36
 
