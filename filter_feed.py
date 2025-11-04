@@ -223,7 +223,7 @@ for article in feed_articles:
         if desc_clean and max_similarity >= 0.45:  # Only check desc if title is promising
             desc_emb = model.encode([desc_clean[:400]])
             desc_sim = cosine_similarity(desc_emb, ref_embeddings).max()
-            if desc_sim >= 0.65:  # Description confirms relevance
+            if desc_sim >= 0.70:  # Description confirms relevance
                 max_similarity = min(max_similarity + DESCRIPTION_BOOST, 1.0)
     else:
         max_similarity = 0.0
