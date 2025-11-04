@@ -14,7 +14,7 @@ OUTPUT_FILE = "filtered.xml"
 ENGLISH_THRESHOLD = 0.60
 MAX_XML_ITEMS = 500
 CUT_OFF_HOURS = 36
-DESCRIPTION_WEIGHT = 0.7  # Weight for description vs title in scoring
+DESCRIPTION_BOOST = 0.15  # Bonus similarity points if description also matches (0-0.3 recommended)
 
 # ===== UTILS =====
 def clean_title(t):
@@ -210,28 +210,21 @@ for article in feed_articles:
     title_clean = clean_title(article["title"])
     desc_clean = clean_description(article["description"])
     
-    # Combine title and description for scoring (title gets more weight)
-    combined_text = title_clean
-    if desc_clean:
-        combined_text = f"{title_clean}. {desc_clean[:300]}"  # Limit desc to first 300 chars
+    # Calculate pattern score on TITLE ONLY (primary signal)
+    pattern_score = calculate_analytical_score(title_clean)
     
-    # Calculate pattern score on combined text
-    pattern_score = calculate_analytical_score(combined_text)
-    
-    # Calculate similarity score on title primarily, boost with description
+    # Calculate similarity score on title primarily
     if ref_embeddings is not None and ref_embeddings.size > 0:
-        # Get title similarity
+        # Get title similarity (main score)
         title_emb = model.encode([title_clean])
-        title_sim = cosine_similarity(title_emb, ref_embeddings).max()
+        max_similarity = cosine_similarity(title_emb, ref_embeddings).max()
         
-        # Get description similarity if available
-        if desc_clean:
-            desc_emb = model.encode([desc_clean[:500]])  # Limit desc length
+        # Optional: Add small boost if description also matches
+        if desc_clean and max_similarity >= 0.40:  # Only check desc if title is promising
+            desc_emb = model.encode([desc_clean[:400]])
             desc_sim = cosine_similarity(desc_emb, ref_embeddings).max()
-            # Weighted average: title matters more
-            max_similarity = (title_sim * (1 - DESCRIPTION_WEIGHT)) + (desc_sim * DESCRIPTION_WEIGHT)
-        else:
-            max_similarity = title_sim
+            if desc_sim >= 0.50:  # Description confirms relevance
+                max_similarity = min(max_similarity + DESCRIPTION_BOOST, 1.0)
     else:
         max_similarity = 0.0
     
