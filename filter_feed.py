@@ -409,52 +409,52 @@ def main():
     print(f"[main] selected {len(final)} final articles")
 
     # 13) Write XML output
-if os.path.exists(OUTPUT_FILE):
-    try:
-        tree = ET.parse(OUTPUT_FILE)
-        root = tree.getroot()
-        channel = root.find("channel")
-        if channel is None:
+    if os.path.exists(OUTPUT_FILE):
+        try:
+            tree = ET.parse(OUTPUT_FILE)
+            root = tree.getroot()
+            channel = root.find("channel")
+            if channel is None:
+                channel = ET.SubElement(root, "channel")
+        except Exception:
+            root = ET.Element("rss", version="2.0")
             channel = ET.SubElement(root, "channel")
-    except Exception:
+            ET.SubElement(channel, "title").text = "Filtered Feed"
+            ET.SubElement(channel, "link").text = "https://yourrepo.github.io/"
+            ET.SubElement(channel, "description").text = "Filtered articles"
+    else:
         root = ET.Element("rss", version="2.0")
         channel = ET.SubElement(root, "channel")
         ET.SubElement(channel, "title").text = "Filtered Feed"
         ET.SubElement(channel, "link").text = "https://yourrepo.github.io/"
         ET.SubElement(channel, "description").text = "Filtered articles"
-else:
-    root = ET.Element("rss", version="2.0")
-    channel = ET.SubElement(root, "channel")
-    ET.SubElement(channel, "title").text = "Filtered Feed"
-    ET.SubElement(channel, "link").text = "https://yourrepo.github.io/"
-    ET.SubElement(channel, "description").text = "Filtered articles"
 
-# Keep track of existing titles to avoid duplicates
-existing_titles = set()
-for item in channel.findall("item"):
-    t = item.find("title")
-    if t is not None:
-        existing_titles.add(t.text)
+    # Keep track of existing titles to avoid duplicates
+    existing_titles = set()
+    for item in channel.findall("item"):
+        t = item.find("title")
+        if t is not None:
+            existing_titles.add(t.text)
 
-# Append new articles at the top (reverse order)
-for a in reversed(final):
-    if a["title"] in existing_titles:
-        continue
-    item = ET.Element("item")
-    ET.SubElement(item, "title").text = a["title"]
-    ET.SubElement(item, "link").text = a["link"]
-    ET.SubElement(item, "pubDate").text = a.get("published", "")
-    ET.SubElement(item, "source").text = a.get("feed_source", "")
-    channel.insert(0, item)
-    existing_titles.add(a["title"])
+    # Append new articles at the top (reverse order)
+    for a in reversed(final):
+        if a["title"] in existing_titles:
+            continue
+        item = ET.Element("item")
+        ET.SubElement(item, "title").text = a["title"]
+        ET.SubElement(item, "link").text = a["link"]
+        ET.SubElement(item, "pubDate").text = a.get("published", "")
+        ET.SubElement(item, "source").text = a.get("feed_source", "")
+        channel.insert(0, item)
+        existing_titles.add(a["title"])
 
-# Cap items to MAX_OUTPUT_ITEMS
-all_items = channel.findall("item")
-if len(all_items) > MAX_OUTPUT_ITEMS:
-    for item in all_items[MAX_OUTPUT_ITEMS:]:
-        channel.remove(item)
+    # Cap items to MAX_OUTPUT_ITEMS
+    all_items = channel.findall("item")
+    if len(all_items) > MAX_OUTPUT_ITEMS:
+        for item in all_items[MAX_OUTPUT_ITEMS:]:
+            channel.remove(item)
 
-# Save the XML
-ET.ElementTree(root).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
-print(f"[main] ✓ wrote {len(final)} items to {OUTPUT_FILE}")
-print("[main] done!")
+    # Save the XML
+    ET.ElementTree(root).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
+    print(f"[main] ✓ wrote {len(final)} items to {OUTPUT_FILE}")
+    print("[main] done!")
