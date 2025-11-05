@@ -3,3 +3,5 @@ sentence-transformers
 scikit-learn
 numpy
 huggingface-hub
+python-dateutil
+requests
