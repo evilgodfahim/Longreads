@@ -48,7 +48,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt || true; fi
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt || true
+          fi
           pip install --no-cache-dir huggingface-hub sentence-transformers scikit-learn numpy feedparser python-dateutil requests
 
       - name: Download SentenceTransformer model if missing
