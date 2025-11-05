@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-filter_feed.py - simplified version
-
-Uses titles.txt directly as reference (no remote pulling needed)
+filter_feed.py - simplified version with automatic GitHub titles fetch
 """
 
 import os
@@ -16,17 +14,18 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import DBSCAN
 from sklearn.metrics.pairwise import cosine_similarity
+import requests
 
 # ===== CONFIG =====
 FEEDS_FILE = "feeds.txt"
-REFERENCE_FILE = "titles.txt"  # ← CHANGED: use titles.txt directly
+REFERENCE_FILE = "titles.txt"
+REFERENCE_URL = "https://raw.githubusercontent.com/evilgodfahim/ref/main/titles.txt"
 REF_EMB_NPY = "ref_embeddings.npy"
 OUTPUT_FILE = "filtered.xml"
 
 MODEL_PATH = "models/all-mpnet-base-v2"
 USE_SMALL_MODEL = False
 
-# thresholds and caps
 ENGLISH_SIM_THRESHOLD = 0.60
 HYBRID_MIN_SIM_LOW = 0.33
 HYBRID_MIN_SIM_HIGH = 0.38
@@ -54,7 +53,7 @@ def clean_title(t: str) -> str:
     if not t:
         return ""
     t = t.strip()
-    t = re.sub(r'["""''\'`]', "", t)
+    t = re.sub(r'["""\'`]', "", t)
     t = re.sub(r"\s+", " ", t)
     return t
 
@@ -94,13 +93,25 @@ def source_weight_from_url(url: str) -> float:
             return v
     return 1.0
 
+# ===== FETCH TITLES FROM GITHUB =====
+def fetch_reference_titles():
+    try:
+        print("[fetch_reference_titles] fetching titles.txt from GitHub...")
+        r = requests.get(REFERENCE_URL)
+        if r.status_code == 200:
+            with open(REFERENCE_FILE, "w", encoding="utf-8") as f:
+                f.write(r.text)
+            print("[fetch_reference_titles] ✓ downloaded titles.txt")
+        else:
+            print(f"[fetch_reference_titles] ERROR: status {r.status_code}")
+    except Exception as e:
+        print(f"[fetch_reference_titles] ERROR: {e}")
+
 # ===== LOAD REFERENCE TITLES =====
 def load_reference_titles():
-    """Load reference titles from titles.txt"""
     if not os.path.exists(REFERENCE_FILE):
         print(f"[load_reference_titles] WARNING: {REFERENCE_FILE} not found")
         return []
-    
     try:
         with open(REFERENCE_FILE, "r", encoding="utf-8") as f:
             titles = [clean_title(line) for line in f if clean_title(line)]
@@ -174,12 +185,15 @@ def calculate_analytical_score(title: str) -> int:
 def main():
     print("[main] starting filter_feed.py")
 
-    # 1) Load reference titles from titles.txt
+    # 1) Fetch the latest titles.txt from GitHub
+    fetch_reference_titles()
+
+    # 2) Load reference titles
     ref_titles = load_reference_titles()
     if not ref_titles:
         print("[main] WARNING: no reference titles loaded, continuing anyway...")
 
-    # 2) Load model
+    # 3) Load model
     if USE_SMALL_MODEL:
         model_name = "sentence-transformers/all-MiniLM-L6-v2"
     else:
@@ -189,7 +203,7 @@ def main():
     print(f"[main] loading model from {model_name}...")
     model = SentenceTransformer(model_name)
 
-    # 3) Compute/load reference embeddings
+    # 4) Compute/load reference embeddings
     ref_embeddings = None
     if ref_titles:
         try:
@@ -217,7 +231,7 @@ def main():
             print(f"[main] ERROR with embeddings: {e}")
             ref_embeddings = None
 
-    # 4) Load feeds
+    # 5) Load feeds
     if not os.path.exists(FEEDS_FILE):
         raise SystemExit(f"[main] {FEEDS_FILE} missing")
     with open(FEEDS_FILE, "r", encoding="utf-8") as f:
@@ -246,12 +260,12 @@ def main():
 
     print(f"[main] found {len(feed_articles)} articles total")
 
-    # 5) Encode articles
+    # 6) Encode articles
     titles = [a["title"] for a in feed_articles]
     print(f"[main] encoding {len(titles)} article titles...")
     article_emb = model.encode(titles, show_progress_bar=False, convert_to_numpy=True)
 
-    # 6) Hybrid filter
+    # 7) Hybrid filter
     print("[main] applying hybrid filter...")
     candidates = []
     for idx, a in enumerate(feed_articles):
@@ -293,7 +307,7 @@ def main():
         print("[main] no candidates; exiting")
         return
 
-    # 7) Time cutoff
+    # 8) Time cutoff
     cutoff_ts = int((datetime.now(timezone.utc) - timedelta(hours=CUTOFF_HOURS)).timestamp())
     candidates = [c for c in candidates if c["timestamp"] >= cutoff_ts]
     print(f"[main] {len(candidates)} candidates after {CUTOFF_HOURS}h cutoff")
@@ -302,7 +316,7 @@ def main():
         print("[main] no recent candidates; exiting")
         return
 
-    # 8) Clustering (DBSCAN)
+    # 9) Clustering (DBSCAN)
     print(f"[main] clustering {len(candidates)} candidates...")
     X = np.vstack([c["embedding"] for c in candidates])
     clustering = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES, metric="cosine").fit(X)
@@ -331,7 +345,7 @@ def main():
         cluster_list.append({"label": lbl, "items": items, "score": cluster_score(items)})
     cluster_list.sort(key=lambda x: x["score"], reverse=True)
 
-    # 9) Region detection
+    # 10) Region detection
     REGION_KEYWORDS = {
         "middle east": ["gaza","israel","palestine","yemen","syria","iran","turkey","saudi","egypt"],
         "europe": ["ukraine","russia","uk","france","germany","balkans","georgia","armenia","azerbaijan"],
@@ -349,7 +363,7 @@ def main():
                     return r
         return "global"
 
-    # 10) Diversity pass & select representatives
+    # 11) Diversity pass & select representatives
     selected = []
     used_regions = set()
     max_consider = min(len(cluster_list), MAX_OUTPUT_ITEMS * 3)
@@ -377,7 +391,7 @@ def main():
     
     selected.sort(key=lambda x: x[0], reverse=True)
 
-    # 11) Final selection
+    # 12) Final selection
     final = []
     seen_titles = set()
     for _, art, _ in selected:
@@ -394,51 +408,53 @@ def main():
 
     print(f"[main] selected {len(final)} final articles")
 
-    # 12) Write XML output
-    if os.path.exists(OUTPUT_FILE):
-        try:
-            tree = ET.parse(OUTPUT_FILE)
-            root = tree.getroot()
-            channel = root.find("channel")
-            if channel is None:
-                root = ET.Element("rss", version="2.0")
-                channel = ET.SubElement(root, "channel")
-        except Exception:
-            root = ET.Element("rss", version="2.0")
+    # 13) Write XML output
+if os.path.exists(OUTPUT_FILE):
+    try:
+        tree = ET.parse(OUTPUT_FILE)
+        root = tree.getroot()
+        channel = root.find("channel")
+        if channel is None:
             channel = ET.SubElement(root, "channel")
-    else:
+    except Exception:
         root = ET.Element("rss", version="2.0")
         channel = ET.SubElement(root, "channel")
         ET.SubElement(channel, "title").text = "Filtered Feed"
         ET.SubElement(channel, "link").text = "https://yourrepo.github.io/"
         ET.SubElement(channel, "description").text = "Filtered articles"
+else:
+    root = ET.Element("rss", version="2.0")
+    channel = ET.SubElement(root, "channel")
+    ET.SubElement(channel, "title").text = "Filtered Feed"
+    ET.SubElement(channel, "link").text = "https://yourrepo.github.io/"
+    ET.SubElement(channel, "description").text = "Filtered articles"
 
-    existing_titles = set()
-    for item in channel.findall("item"):
-        t = item.find("title")
-        if t is not None:
-            existing_titles.add(t.text)
+# Keep track of existing titles to avoid duplicates
+existing_titles = set()
+for item in channel.findall("item"):
+    t = item.find("title")
+    if t is not None:
+        existing_titles.add(t.text)
 
-    for a in reversed(final):
-        if a["title"] in existing_titles:
-            continue
-        item = ET.Element("item")
-        ET.SubElement(item, "title").text = a["title"]
-        ET.SubElement(item, "link").text = a["link"]
-        ET.SubElement(item, "pubDate").text = a.get("published", "")
-        ET.SubElement(item, "source").text = a.get("feed_source", "")
-        channel.insert(0, item)
-        existing_titles.add(a["title"])
+# Append new articles at the top (reverse order)
+for a in reversed(final):
+    if a["title"] in existing_titles:
+        continue
+    item = ET.Element("item")
+    ET.SubElement(item, "title").text = a["title"]
+    ET.SubElement(item, "link").text = a["link"]
+    ET.SubElement(item, "pubDate").text = a.get("published", "")
+    ET.SubElement(item, "source").text = a.get("feed_source", "")
+    channel.insert(0, item)
+    existing_titles.add(a["title"])
 
-    # Cap items
-    all_items = channel.findall("item")
-    if len(all_items) > MAX_OUTPUT_ITEMS:
-        for item in all_items[MAX_OUTPUT_ITEMS:]:
-            channel.remove(item)
+# Cap items to MAX_OUTPUT_ITEMS
+all_items = channel.findall("item")
+if len(all_items) > MAX_OUTPUT_ITEMS:
+    for item in all_items[MAX_OUTPUT_ITEMS:]:
+        channel.remove(item)
 
-    ET.ElementTree(root).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
-    print(f"[main] ✓ wrote {len(final)} items to {OUTPUT_FILE}")
-    print("[main] done!")
-
-if __name__ == "__main__":
-    main()
+# Save the XML
+ET.ElementTree(root).write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
+print(f"[main] ✓ wrote {len(final)} items to {OUTPUT_FILE}")
+print("[main] done!")
