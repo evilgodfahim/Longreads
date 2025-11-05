@@ -5,9 +5,18 @@ on:
     - cron: '45 * * * *'
   workflow_dispatch:
 
+concurrency:
+  group: feed-update
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
 jobs:
   update-feed:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - name: Checkout Repo
@@ -23,7 +32,7 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-pip-
 
-    - name: Cache Sentence Transformer model
+    - name: Cache SentenceTransformer model
       uses: actions/cache@v3
       with:
         path: models/all-mpnet-base-v2
@@ -34,13 +43,13 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install Dependencies
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install huggingface-hub sentence-transformers scikit-learn numpy feedparser python-dateutil
+        pip install huggingface-hub sentence-transformers scikit-learn numpy feedparser python-dateutil requests
 
-    - name: Download Sentence Transformer Model if Missing
+    - name: Download SentenceTransformer model if missing
       run: |
         if [ ! -d "models/all-mpnet-base-v2" ]; then
           python - <<EOF
@@ -53,8 +62,8 @@ snapshot_download(
 EOF
         fi
 
-    # ✅ IMPORTANT: force script to run in repo root
-    - name: Run Feed Script
+    # ✅ critical: run in repo root
+    - name: Run feed script
       working-directory: ${{ github.workspace }}
       run: python filter_feed.py
 
@@ -63,6 +72,6 @@ EOF
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
         git add filtered.xml reference_titles.txt ref_titles_cache.json embedded_titles.json index.html || true
-        git commit -m "Update filtered feed and reference titles" || echo "No changes to commit"
+        git commit -m "Automated feed update: filtered feed and reference titles" || echo "No changes to commit"
         git pull --rebase origin main || true
-        git push || true
+        git push origin HEAD:main || true
