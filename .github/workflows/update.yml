@@ -2,72 +2,67 @@ name: Feed Update Every 60 Minutes
 
 on:
   schedule:
-    - cron: '45 * * * *'  # Runs every hour at 45 minutes past
+    - cron: '45 * * * *'
   workflow_dispatch:
-
-concurrency:
-  group: feed-update
-  cancel-in-progress: true
-
-permissions:
-  contents: write
 
 jobs:
   update-feed:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - name: Checkout Repo
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    - name: Checkout Repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-      - name: Cache pip
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+    - name: Cache pip
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
 
-      - name: Cache SentenceTransformer model
-        uses: actions/cache@v3
-        with:
-          path: models/all-mpnet-base-v2
-          key: ${{ runner.os }}-st-model-mpnet-v2
-          restore-keys: |
-            ${{ runner.os }}-st-model-mpnet-v2-
+    - name: Cache Sentence Transformer model
+      uses: actions/cache@v3
+      with:
+        path: models/all-mpnet-base-v2
+        key: ${{ runner.os }}-st-model-mpnet-v2
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt || true
-          fi
-          pip install --no-cache-dir huggingface-hub sentence-transformers scikit-learn numpy feedparser python-dateutil requests
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install huggingface-hub sentence-transformers scikit-learn numpy feedparser python-dateutil
 
-      - name: Download SentenceTransformer model if missing
-        run: |
-          if [ ! -d "models/all-mpnet-base-v2" ]; then
-            python -c "from huggingface_hub import snapshot_download; snapshot_download('sentence-transformers/all-mpnet-base-v2', local_dir='models/all-mpnet-base-v2')"
-          fi
+    - name: Download Sentence Transformer Model if Missing
+      run: |
+        if [ ! -d "models/all-mpnet-base-v2" ]; then
+          python - <<EOF
+from huggingface_hub import snapshot_download
+snapshot_download(
+    repo_id="sentence-transformers/all-mpnet-base-v2",
+    local_dir="models/all-mpnet-base-v2",
+    local_dir_use_symlinks=False
+)
+EOF
+        fi
 
-      - name: Run feed script
-        run: python filter_feed.py
+    # ✅ IMPORTANT: force script to run in repo root
+    - name: Run Feed Script
+      working-directory: ${{ github.workspace }}
+      run: python filter_feed.py
 
-      - name: Commit and Push Updates
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # keep file names unchanged
-          git add filtered.xml reference_titles.txt ref_checkpoint.json ref_titles_cache.json ref_embeddings.npy || true
-          git commit -m "Automated feed update: filtered feed and reference titles" || echo "No changes to commit"
-          git pull --rebase origin main || true
-          git push origin HEAD:main || true
+    - name: Commit and Push Updates
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add filtered.xml reference_titles.txt ref_titles_cache.json embedded_titles.json index.html || true
+        git commit -m "Update filtered feed and reference titles" || echo "No changes to commit"
+        git pull --rebase origin main || true
+        git push || true
