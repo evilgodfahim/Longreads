@@ -129,6 +129,8 @@ def prune_ref_meta(meta):
     for m in meta:
         try:
             added = dateparser.parse(m.get("added_at"))
+            if added.tzinfo is not None:
+                added = added.astimezone(tz=None).replace(tzinfo=None)  # convert to naive UTC
         except Exception:
             added = datetime.utcnow()
         if added >= cutoff:
@@ -140,7 +142,10 @@ def prune_ref_meta(meta):
         scored = []
         for m in meta:
             try:
-                added_ts = dateparser.parse(m.get("added_at")).timestamp()
+                added_ts = dateparser.parse(m.get("added_at"))
+                if added_ts.tzinfo is not None:
+                    added_ts = added_ts.astimezone(tz=None).replace(tzinfo=None)
+                added_ts = added_ts.timestamp()
             except:
                 added_ts = now_ts
             age_days = max(0.0, (now_ts - added_ts) / 86400.0)
@@ -150,6 +155,7 @@ def prune_ref_meta(meta):
         scored.sort(key=lambda x: x[1], reverse=True)
         meta = [m for m, _ in scored[:MAX_REF_TITLES]]
     return meta
+        
 
 def incremental_pull_and_append():
     """
