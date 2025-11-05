@@ -72,10 +72,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || true
-          git add filtered.xml reference_titles.txt embedded_titles.json index.html
+          git add filtered.xml
+          [ -f index.html ] && git add index.html || true
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Automated feed update: filtered feed and reference titles"
+            git commit -m "Automated feed update: filtered feed"
             git push origin HEAD:main
           fi
