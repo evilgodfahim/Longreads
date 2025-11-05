@@ -56,10 +56,7 @@ jobs:
       - name: Download SentenceTransformer model if missing
         run: |
           if [ ! -d "models/all-mpnet-base-v2" ]; then
-            python - <<'PY'
-from huggingface_hub import snapshot_download
-snapshot_download('sentence-transformers/all-mpnet-base-v2', local_dir='models/all-mpnet-base-v2')
-PY
+            python -c "from huggingface_hub import snapshot_download; snapshot_download('sentence-transformers/all-mpnet-base-v2', local_dir='models/all-mpnet-base-v2')"
           fi
 
       - name: Run feed script
@@ -69,6 +66,7 @@ PY
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # keep file names unchanged
           git add filtered.xml reference_titles.txt ref_checkpoint.json ref_titles_cache.json ref_embeddings.npy || true
           git commit -m "Automated feed update: filtered feed and reference titles" || echo "No changes to commit"
           git pull --rebase origin main || true
