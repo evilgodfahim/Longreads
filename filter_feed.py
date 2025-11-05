@@ -37,14 +37,7 @@ MAX_OUTPUT_ITEMS = 75
 DBSCAN_EPS = 0.22
 DBSCAN_MIN_SAMPLES = 1
 
-SOURCE_WEIGHTS = {
-    "reuters.com": 2.0,
-    "nytimes.com": 2.0,
-    "washingtonpost.com": 1.8,
-    "cnn.com": 1.6,
-    "aljazeera.com": 1.6,
-    "bbc.co.uk": 1.8,
-}
+
 
 # ===== UTIL =====
 def clean_title(t: str) -> str:
@@ -81,13 +74,6 @@ def domain_from_url(url: str) -> str:
         pass
     return ""
 
-def source_weight_from_url(url: str) -> float:
-    dom = domain_from_url(url)
-    for k, v in SOURCE_WEIGHTS.items():
-        if k in dom:
-            return v
-    return 1.0
-
 # ===== FETCH TITLES FROM GITHUB =====
 def fetch_reference_titles():
     try:
@@ -123,15 +109,6 @@ def calculate_analytical_score(title: str) -> int:
     tl = title.lower()
     score = 0
 
-    crisis_terms = [
-        'war','conflict','crisis','collapse','violence','attack','strikes','invasion','sanctions',
-        'blockade','ceasefire','offensive','bombing','insurgency','coup','protests','unrest','genocide',
-        'massacre','refugees','displacement','humanitarian','famine','drought','terror','clashes',
-        'shelling','uprising','hostilities','tensions','retaliation','raid','mobilization','escalation',
-        'hostage','airstrike','militia','civil war','rebels','armed group'
-    ]
-    score += min(sum(1 for term in crisis_terms if term in tl) * 2, 6)
-
     if any(p in tl for p in ['-', ' v ', ' vs ', ' versus ', ' and ', ' with ']):
         score += 2
     if "'s " in tl or "'" in tl:
@@ -140,39 +117,6 @@ def calculate_analytical_score(title: str) -> int:
     question_starters = ['why ','how ','what ','can ','will ','should ','is ','are ','do ','does ','could ','may ','might ','would ']
     if any(tl.startswith(q) for q in question_starters):
         score += 2
-
-    geo_terms = [
-        'economic','trade','debt','inflation','currency','military','nuclear','election','government','regime',
-        'policy','treaty','agreement','dispute','territorial','sovereignty','peacekeeping','intervention','occupation',
-        'embargo','tariffs','bilateral','multilateral','alliance','nato','un','security','defense','border','independence',
-        'autonomy','separatist','geopolitics','foreign policy','diplomacy','strategy','strategic','realignment','deterrence',
-        'containment','bloc','regional order','sanction','power balance','influence','proxy','geostrategic'
-    ]
-    score += min(sum(1 for term in geo_terms if term in tl), 3)
-
-    outcome_terms = ['faces','threatens','undermines','deepens','escalates','intensifies','worsens','persists','continues','remains','struggles','fails']
-    if any(term in tl for term in outcome_terms):
-        score += 1
-
-    explanatory = ['reveals','shows','exposes','impact on','impact of','implications','consequences','amid','despite','analysis','explained','lessons from']
-    if any(exp in tl for exp in explanatory):
-        score += 1
-
-    comparative = ['between','versus','against','compared to','the paradox','the dilemma','the challenge','crossroads']
-    if any(comp in tl for comp in comparative):
-        score += 1
-
-    future = ['future of','will ','could ','may ','might ','outlook','prospects','next phase','ahead','forecast','trajectory']
-    if any(fut in tl for fut in future):
-        score += 1
-
-    regions = ['middle east','south asia','east asia','southeast asia','central asia','africa','europe','gaza','israel','palestine','ukraine','russia','china','india','pakistan','iran','turkey','yemen','syria','afghanistan','bangladesh','myanmar','taiwan','korea','japan','ethiopia','sudan','nigeria']
-    if any(region in tl for region in regions):
-        score += 1
-
-    news_indicators = ['announces','launches','opens','celebrates','wins award','ceremony','appointed today','signs deal today','breaks record','new product','birthday','gala','sports','match','tournament','cup','music','film','startup','company','brand','fashion']
-    if any(ind in tl for ind in news_indicators):
-        score -= 3
 
     return score
 
@@ -248,8 +192,7 @@ def main():
                 "pattern_score": pat,
                 "sim_to_refs": max_sim,
                 "embedding": article_emb[idx],
-                "timestamp": timestamp_from_pubdate(a.get("published","")),
-                "source_weight": source_weight_from_url(a.get("link",""))
+                "timestamp": timestamp_from_pubdate(a.get("published",""))
             })
             candidates.append(meta)
 
@@ -282,38 +225,18 @@ def main():
     def cluster_score(cluster):
         size = len(cluster)
         avg_pat = sum(x["pattern_score"] for x in cluster) / max(1, size)
-        sum_source = sum(x["source_weight"] for x in cluster)
         max_ts = max(x["timestamp"] for x in cluster)
         age_hours = max(1, (datetime.now(timezone.utc).timestamp() - max_ts) / 3600.0)
         recency_boost = 1.0 / (1.0 + age_hours / 24.0)
-        return size * (1 + avg_pat / 5.0) * (1 + (sum_source - size) / 5.0) * (1 + recency_boost)
+        return size * (1 + avg_pat / 5.0) * (1 + recency_boost)
 
     cluster_list = []
     for lbl, items in clusters.items():
         cluster_list.append({"label": lbl, "items": items, "score": cluster_score(items)})
     cluster_list.sort(key=lambda x: x["score"], reverse=True)
 
-    # ===== REGION DETECTION =====
-    REGION_KEYWORDS = {
-        "middle east": ["gaza","israel","palestine","yemen","syria","iran","turkey","saudi","egypt"],
-        "europe": ["ukraine","russia","uk","france","germany","balkans","georgia","armenia","azerbaijan"],
-        "south asia": ["india","pakistan","bangladesh","afghanistan","sri lanka","nepal"],
-        "east asia": ["china","taiwan","korea","japan"],
-        "africa": ["ethiopia","sudan","nigeria","kenya","somalia","mali","libya"],
-        "latin america": ["venezuela","colombia","brazil","mexico"],
-    }
-
-    def detect_region(title):
-        tl = title.lower()
-        for r, kws in REGION_KEYWORDS.items():
-            for kw in kws:
-                if kw in tl:
-                    return r
-        return "global"
-
     # ===== DIVERSITY & FINAL SELECTION =====
     selected = []
-    used_regions = set()
     max_consider = min(len(cluster_list), MAX_OUTPUT_ITEMS * 3)
 
     for cl in cluster_list[:max_consider]:
@@ -324,7 +247,7 @@ def main():
         for it in items:
             recency_hours = max(1, (datetime.now(timezone.utc).timestamp() - it["timestamp"]) / 3600.0)
             recency_score = 1.0 / (1.0 + recency_hours / 24.0)
-            item_score = it["pattern_score"] * 2.0 + it["sim_to_refs"] * 5.0 + it["source_weight"] * 1.5 + recency_score
+            item_score = it["pattern_score"] * 2.0 + it["sim_to_refs"] * 5.0 + recency_score
             if item_score > best_score:
                 best_score = item_score
                 best = it
@@ -332,17 +255,15 @@ def main():
         if not best:
             continue
 
-        region = detect_region(best["title"])
-        priority = cl["score"] * (1.2 if region not in used_regions else 0.8)
-        selected.append((priority, best, region))
-        used_regions.add(region)
+        priority = cl["score"]
+        selected.append((priority, best))
 
     selected.sort(key=lambda x: x[0], reverse=True)
 
     # ===== FINALIZE OUTPUT =====
     final = []
     seen_titles = set()
-    for _, art, _ in selected:
+    for _, art in selected:
         if art["title"] in seen_titles:
             continue
         final.append(art)
