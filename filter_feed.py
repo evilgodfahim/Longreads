@@ -156,7 +156,6 @@ def prune_ref_meta(meta):
         meta = [m for m, _ in scored[:MAX_REF_TITLES]]
     return meta
         
-
 def incremental_pull_and_append():
     """
     - Pull remote titles (public).
