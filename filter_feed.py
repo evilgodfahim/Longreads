@@ -35,7 +35,7 @@ HYBRID_PATTERN_HIGH = 8
 CUTOFF_HOURS = 36
 MAX_OUTPUT_ITEMS = 75
 
-DBSCAN_EPS = 0.28
+DBSCAN_EPS = 0.20
 DBSCAN_MIN_SAMPLES = 1
 
 # ---- New single control parameter (0.0 lenient -> 1.0 strict) ----
