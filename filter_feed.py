@@ -38,7 +38,7 @@ DBSCAN_EPS = 0.22
 DBSCAN_MIN_SAMPLES = 1
 
 # ---- New single control parameter (0.0 lenient -> 1.0 strict) ----
-FILTER_STRENGTH = 0.60  # default moderate
+FILTER_STRENGTH = 0.5  # default moderate
 DEBUG_FILTER = False    # set True to print per-article debug info
 # -------------------------------------------------------------------
 
@@ -339,34 +339,37 @@ def main():
     cluster_list.sort(key=lambda x: x["score"], reverse=True)
 
     # ===== DIVERSITY & FINAL SELECTION =====
+    # New logic: pick at most ONE representative per cluster to avoid near-duplicate articles.
     selected = []
-    max_consider = min(len(cluster_list), MAX_OUTPUT_ITEMS * 3)
+    # Helper to compute per-item score (same formula used previously)
+    def compute_item_score(it):
+        recency_hours = max(1, (datetime.now(timezone.utc).timestamp() - it["timestamp"]) / 3600.0)
+        recency_score = 1.0 / (1.0 + recency_hours / 24.0)
+        return it["pattern_score"] * 2.0 + it["sim_to_refs"] * 5.0 + recency_score
 
-    for cl in cluster_list[:max_consider]:
+    # Build a list of cluster representatives
+    cluster_reps = []
+    for cl in cluster_list:
         items = cl["items"]
-        best = None
+        best_item = None
         best_score = -1
-
         for it in items:
-            recency_hours = max(1, (datetime.now(timezone.utc).timestamp() - it["timestamp"]) / 3600.0)
-            recency_score = 1.0 / (1.0 + recency_hours / 24.0)
-            item_score = it["pattern_score"] * 2.0 + it["sim_to_refs"] * 5.0 + recency_score
-            if item_score > best_score:
-                best_score = item_score
-                best = it
+            sc = compute_item_score(it)
+            if sc > best_score:
+                best_score = sc
+                best_item = it
+        if best_item is not None:
+            cluster_reps.append({"label": cl["label"], "rep": best_item, "cluster_score": cl["score"], "rep_item_score": best_score})
 
-        if not best:
-            continue
+    # Sort cluster representatives by cluster_score (priority), then rep_item_score
+    cluster_reps.sort(key=lambda x: (x["cluster_score"], x["rep_item_score"]), reverse=True)
 
-        priority = cl["score"]
-        selected.append((priority, best))
-
-    selected.sort(key=lambda x: x[0], reverse=True)
-
-    # ===== FINALIZE OUTPUT =====
+    # Select up to MAX_OUTPUT_ITEMS representatives (one per cluster)
     final = []
     seen_titles = set()
-    for _, art in selected:
+    for crep in cluster_reps:
+        art = crep["rep"]
+        # avoid exact duplicate titles if any
         if art["title"] in seen_titles:
             continue
         final.append(art)
@@ -374,6 +377,7 @@ def main():
         if len(final) >= MAX_OUTPUT_ITEMS:
             break
 
+    # If for some reason final is empty (shouldn't happen), fall back to first items from cluster_list
     if not final:
         for cl in cluster_list[:MAX_OUTPUT_ITEMS]:
             final.append(cl["items"][0])
