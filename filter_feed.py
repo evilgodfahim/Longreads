@@ -35,11 +35,11 @@ HYBRID_PATTERN_HIGH = 8
 CUTOFF_HOURS = 36
 MAX_OUTPUT_ITEMS = 75
 
-DBSCAN_EPS = 0.22
+DBSCAN_EPS = 0.28
 DBSCAN_MIN_SAMPLES = 1
 
 # ---- New single control parameter (0.0 lenient -> 1.0 strict) ----
-FILTER_STRENGTH = 0.5  # default moderate
+FILTER_STRENGTH = 0.60  # default moderate
 DEBUG_FILTER = False    # set True to print per-article debug info
 # -------------------------------------------------------------------
 
