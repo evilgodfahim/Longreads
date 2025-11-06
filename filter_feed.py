@@ -5,6 +5,7 @@ filter_feed.py - simplified version with automatic GitHub titles fetch
 
 import os
 import re
+import hashlib
 import feedparser
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -34,11 +35,11 @@ HYBRID_PATTERN_HIGH = 8
 CUTOFF_HOURS = 36
 MAX_OUTPUT_ITEMS = 75
 
-DBSCAN_EPS = 0.25
+DBSCAN_EPS = 0.22
 DBSCAN_MIN_SAMPLES = 1
 
 # ---- New single control parameter (0.0 lenient -> 1.0 strict) ----
-FILTER_STRENGTH = 0.60  # default moderate
+FILTER_STRENGTH = 0.5  # default moderate
 DEBUG_FILTER = False    # set True to print per-article debug info
 # -------------------------------------------------------------------
 
@@ -82,7 +83,7 @@ def domain_from_url(url: str) -> str:
 def fetch_reference_titles():
     try:
         print("[fetch_reference_titles] fetching titles.txt from GitHub...")
-        r = requests.get(REFERENCE_URL)
+        r = requests.get(REFERENCE_URL, timeout=15)
         if r.status_code == 200:
             with open(REFERENCE_FILE, "w", encoding="utf-8") as f:
                 f.write(r.text)
@@ -138,19 +139,48 @@ def main():
         raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
     model = SentenceTransformer(model_name)
 
-    # Compute/load reference embeddings
+    # ---- Compute/load reference embeddings (robust: keyed by titles file hash) ----
     ref_embeddings = None
     if ref_titles:
-        if os.path.exists(REF_EMB_NPY):
-            emb_cache = np.load(REF_EMB_NPY)
-            if emb_cache.shape[0] == len(ref_titles):
-                ref_embeddings = emb_cache
-            else:
+        def _titles_hash(titles_list):
+            h = hashlib.sha256()
+            joined = "\n".join(titles_list).encode("utf-8")
+            h.update(joined)
+            return h.hexdigest()
+
+        titles_hash = _titles_hash(ref_titles)
+        hash_file = REF_EMB_NPY + ".sha256"
+
+        # if numpy cache exists and hash file exists and matches, load cache
+        if os.path.exists(REF_EMB_NPY) and os.path.exists(hash_file):
+            try:
+                with open(hash_file, "r", encoding="utf-8") as hf:
+                    cached_hash = hf.read().strip()
+                if cached_hash == titles_hash:
+                    try:
+                        emb_cache = np.load(REF_EMB_NPY)
+                        if emb_cache.size > 0:
+                            ref_embeddings = emb_cache
+                            print(f"[ref_emb] loaded cached embeddings ({REF_EMB_NPY})")
+                    except Exception as e:
+                        print(f"[ref_emb] failed loading cache, will recompute: {e}")
+                        ref_embeddings = None
+                else:
+                    print("[ref_emb] titles changed: regenerating reference embeddings")
+            except Exception as e:
+                print(f"[ref_emb] failed reading hash file: {e}")
+
+        # If embeddings still None, compute and save + store hash
+        if ref_embeddings is None:
+            try:
+                print("[ref_emb] computing reference embeddings...")
                 ref_embeddings = model.encode(ref_titles, convert_to_numpy=True)
                 np.save(REF_EMB_NPY, ref_embeddings)
-        else:
-            ref_embeddings = model.encode(ref_titles, convert_to_numpy=True)
-            np.save(REF_EMB_NPY, ref_embeddings)
+                with open(hash_file, "w", encoding="utf-8") as hf:
+                    hf.write(titles_hash)
+                print(f"[ref_emb] saved embeddings to {REF_EMB_NPY} and hash to {hash_file}")
+            except Exception as e:
+                print(f"[ref_emb] ERROR computing/saving embeddings: {e}")
 
     # Load feeds
     if not os.path.exists(FEEDS_FILE):
@@ -340,7 +370,6 @@ def main():
 
     # ===== DIVERSITY & FINAL SELECTION =====
     # New logic: pick at most ONE representative per cluster to avoid near-duplicate articles.
-    selected = []
     # Helper to compute per-item score (same formula used previously)
     def compute_item_score(it):
         recency_hours = max(1, (datetime.now(timezone.utc).timestamp() - it["timestamp"]) / 3600.0)
@@ -384,23 +413,81 @@ def main():
 
     print(f"[main] selected {len(final)} final articles")
 
-    # ===== WRITE XML =====
+    # ===== APPEND MODE: KEEP LAST 500 ITEMS =====
+    print("[main] appending to existing filtered.xml (max 500 items)")
+
+    # Load existing items if file exists
+    existing_items = []
+    if os.path.exists(OUTPUT_FILE):
+        try:
+            tree_prev = ET.parse(OUTPUT_FILE)
+            root_prev = tree_prev.getroot()
+            for item in root_prev.findall("./channel/item"):
+                existing_items.append({
+                    "title": (item.findtext("title") or "").strip(),
+                    "link": (item.findtext("link") or "").strip(),
+                    "pubDate": (item.findtext("pubDate") or "").strip(),
+                    "source": (item.findtext("source") or "").strip()
+                })
+            print(f"[main] loaded {len(existing_items)} existing items from {OUTPUT_FILE}")
+        except Exception as e:
+            print(f"[main] warning: failed to parse existing xml: {e}")
+
+    # Merge new (final) + existing, deduplicate by normalized link or title
+    seen = set()
+    merged = []
+
+    def _norm_key(title: str, link: str) -> str:
+        """Return normalized dedupe key: prefer link, otherwise normalized title."""
+        if link:
+            return link.strip()
+        return re.sub(r"\s+", " ", (title or "").strip().lower())
+
+    # Add new items first (so newest are first)
+    for art in final:
+        key = _norm_key(art.get("title",""), art.get("link",""))
+        if not key:
+            continue
+        if key not in seen:
+            seen.add(key)
+            merged.append({
+                "title": art.get("title",""),
+                "link": art.get("link",""),
+                "pubDate": datetime.utcfromtimestamp(art.get("timestamp", int(datetime.now(timezone.utc).timestamp()))).strftime("%a, %d %b %Y %H:%M:%S GMT"),
+                "source": art.get("feed_source", "")
+            })
+
+    # Append older existing items if they are not duplicates
+    for art in existing_items:
+        key = _norm_key(art.get("title",""), art.get("link",""))
+        if not key:
+            continue
+        if key not in seen:
+            seen.add(key)
+            merged.append(art)
+
+    # Keep only newest 500 items
+    MAX_ARCHIVE_ITEMS = 500
+    merged = merged[:MAX_ARCHIVE_ITEMS]
+    print(f"[main] merged total items after dedupe: {len(merged)} (capped at {MAX_ARCHIVE_ITEMS})")
+
+    # Write back clean RSS XML (new file replacing the old, but content is merged)
     root = ET.Element("rss", version="2.0")
     channel = ET.SubElement(root, "channel")
     ET.SubElement(channel, "title").text = "Filtered Feed"
     ET.SubElement(channel, "link").text = "https://example.com"
     ET.SubElement(channel, "description").text = "Filtered feed articles"
 
-    for art in final:
+    for art in merged:
         item = ET.SubElement(channel, "item")
-        ET.SubElement(item, "title").text = art["title"]
-        ET.SubElement(item, "link").text = art["link"]
-        ET.SubElement(item, "pubDate").text = datetime.utcfromtimestamp(art["timestamp"]).strftime("%a, %d %b %Y %H:%M:%S GMT")
-        ET.SubElement(item, "source").text = art.get("feed_source", "")
+        ET.SubElement(item, "title").text = art.get("title", "")
+        ET.SubElement(item, "link").text = art.get("link", "")
+        ET.SubElement(item, "pubDate").text = art.get("pubDate", "")
+        ET.SubElement(item, "source").text = art.get("source", "")
 
     tree = ET.ElementTree(root)
     tree.write(OUTPUT_FILE, encoding="utf-8", xml_declaration=True)
-    print(f"[main] written {len(final)} articles to {OUTPUT_FILE}")
+    print(f"[main] appended {len(final)} new items; final {len(merged)} items written to {OUTPUT_FILE}")
 
 if __name__ == "__main__":
     main()
