@@ -37,6 +37,10 @@ MAX_OUTPUT_ITEMS = 75
 DBSCAN_EPS = 0.22
 DBSCAN_MIN_SAMPLES = 1
 
+# ---- New single control parameter (0.0 lenient -> 1.0 strict) ----
+FILTER_STRENGTH = 0.5  # default moderate
+DEBUG_FILTER = False    # set True to print per-article debug info
+# -------------------------------------------------------------------
 
 
 # ===== UTIL =====
@@ -173,28 +177,127 @@ def main():
     # Encode articles
     article_emb = model.encode([a["title"] for a in feed_articles], convert_to_numpy=True)
 
-    # Hybrid filter
+    # ===== HYBRID FILTER (ENHANCED) =====
+    # Single-parameter control: FILTER_STRENGTH in [0.0, 1.0]
+    # This block computes richer semantic signals (top-k ref similarity, ref-coherence)
+    # and a shallowness penalty, then makes a single composite decision.
     candidates = []
+
+    TOP_K = 5  # number of top reference titles to inspect per article (kept small)
     for idx, a in enumerate(feed_articles):
         t = a["title"]
         pat = calculate_analytical_score(t)
+
+        # Article embedding (numpy vector)
+        art_emb = article_emb[idx]
+
+        # If we have reference embeddings, compute similarity signals
         max_sim = 0.0
+        mean_topk = 0.0
+        ref_coherence = 0.0  # how similar the top-k refs are to each other
+        sims = None
         if ref_embeddings is not None and ref_embeddings.size > 0:
-            sims = cosine_similarity([article_emb[idx]], ref_embeddings)[0]
+            # sims: similarity between this article and every ref title
+            sims = cosine_similarity([art_emb], ref_embeddings)[0]
+            # primary signals
             max_sim = float(np.max(sims))
-        accept = (max_sim >= ENGLISH_SIM_THRESHOLD) or \
-                 (pat >= HYBRID_PATTERN_MED and max_sim >= 0.33) or \
-                 (pat >= (HYBRID_PATTERN_MED - 2) and max_sim >= 0.38) or \
-                 (pat >= HYBRID_PATTERN_HIGH and max_sim >= 0.30)
+            # top-k mean similarity
+            # handle case when there are fewer refs than TOP_K
+            k = min(TOP_K, sims.shape[0])
+            topk_idx = np.argsort(sims)[-k:][::-1]  # indices of top-k (desc)
+            topk_vals = sims[topk_idx] if topk_idx.size > 0 else np.array([max_sim])
+            mean_topk = float(np.mean(topk_vals)) if topk_vals.size > 0 else max_sim
+
+            # ref coherence: average pairwise cosine among the selected top-k reference embeddings
+            if len(topk_idx) > 1:
+                topk_embs = ref_embeddings[topk_idx]
+                # pairwise similarity matrix
+                pair_mat = cosine_similarity(topk_embs)
+                # take upper triangle (excluding diagonal) mean
+                n = pair_mat.shape[0]
+                if n > 1:
+                    upper_ix = np.triu_indices(n, k=1)
+                    # protect against empty upper triangle
+                    if upper_ix[0].size > 0:
+                        ref_coherence = float(np.mean(pair_mat[upper_ix]))
+                    else:
+                        ref_coherence = 0.0
+                else:
+                    ref_coherence = 0.0
+            else:
+                ref_coherence = 0.0
+
+        # ----- pattern / shallowness heuristics -----
+        # Normalize pattern score to [0,1] (pattern score expected small int)
+        norm_pat = max(0.0, min(1.0, pat / 6.0))
+
+        # Shallow/clickbait heuristics (penalty between 0..1)
+        shallow_penalty = 0.0
+        if t:
+            tl = t.strip()
+            # All-caps very likely clickbaity / low quality
+            if tl.isupper():
+                shallow_penalty += 0.45
+            # Exclamation mark or suspicious phrases
+            if "!" in tl:
+                shallow_penalty += 0.25
+            low_quality_phrases = ["you won't believe", "won't believe", "shocking", "what happened next",
+                                   "this is why", "must see", "can't miss", "will blow your mind"]
+            tl_lower = tl.lower()
+            if any(p in tl_lower for p in low_quality_phrases):
+                shallow_penalty += 0.35
+            # Short listicles like "10 ways ..." are often shallow
+            if re.search(r'^\d+\s+(ways|things|reasons)\b', tl_lower):
+                shallow_penalty += 0.20
+        shallow_penalty = min(1.0, shallow_penalty)
+
+        # ----- Composite semantic signal -----
+        # We combine: max_sim (most important), mean_topk (robustness), ref_coherence (topic sanity),
+        # and normalized pattern score (small positive boost).
+        # Fixed internal weights produce a stable composite score in [0,1].
+        w_max = 0.60
+        w_mean = 0.20
+        w_coh = 0.10
+        w_pat = 0.10
+        composite = (w_max * max_sim) + (w_mean * mean_topk) + (w_coh * ref_coherence) + (w_pat * norm_pat)
+
+        # Apply shallowness penalty: reduce composite
+        composite = composite * (1.0 - 0.65 * shallow_penalty)  # penalize up to ~65%
+
+        # ----- Adaptive acceptance threshold derived from FILTER_STRENGTH -----
+        # threshold ranges roughly from 0.35 (lenient) to 0.8 (strict)
+        adaptive_threshold = 0.35 + FILTER_STRENGTH * 0.45
+
+        # Minimum semantic requirement: ensure not accepting total noise when Filter is strict
+        min_sim_required = 0.20 + FILTER_STRENGTH * 0.45  # range ~0.20..0.65
+
+        # Final accept logic:
+        # - Must have composite >= adaptive_threshold
+        # - And the raw max_sim must be at least min_sim_required OR the pattern score must be high enough
+        pat_thresh = 1 + int(FILTER_STRENGTH * 4)  # maps 0..1 to 1..5
+        accept = False
+        if composite >= adaptive_threshold:
+            if max_sim >= min_sim_required or pat >= pat_thresh:
+                accept = True
+
+        if DEBUG_FILTER:
+            print(f"[DEBUG] title={t!r}\n"
+                  f"        max_sim={max_sim:.3f} mean_topk={mean_topk:.3f} ref_coh={ref_coherence:.3f}\n"
+                  f"        pat={pat} norm_pat={norm_pat:.3f} shallow_pen={shallow_penalty:.2f}\n"
+                  f"        composite={composite:.3f} adaptive_th={adaptive_threshold:.3f} "
+                  f"min_sim_req={min_sim_required:.3f} accept={accept}")
+
+        # If accepted, prepare meta as before
         if accept:
             meta = a.copy()
             meta.update({
                 "pattern_score": pat,
                 "sim_to_refs": max_sim,
-                "embedding": article_emb[idx],
+                "embedding": art_emb,
                 "timestamp": timestamp_from_pubdate(a.get("published",""))
             })
             candidates.append(meta)
+    # ===== END ENHANCED HYBRID FILTER =====
 
     if not candidates:
         print("[main] no candidates passed filter; exiting")
