@@ -67,3 +67,4 @@ https://www.modadgeopolitics.com/feed
 https://geopoliticsagi.substack.com/feed
 https://katehon.com/en/rss.xml
 https://www.theguardian.com/us/commentisfree/rss
+https://evilgodfahim.github.io/intop/filtered.xml
