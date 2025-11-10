@@ -68,3 +68,10 @@ https://geopoliticsagi.substack.com/feed
 https://katehon.com/en/rss.xml
 https://www.theguardian.com/us/commentisfree/rss
 https://evilgodfahim.github.io/intop/filtered.xml
+https://blogs.timesofindia.indiatimes.com/feed/defaultrss
+https://indianexpress.com/section/explained/feed/
+https://indianexpress.com/section/opinion/editorials/feed/
+https://indianexpress.com/section/opinion/feed/
+https://www.thehindu.com/opinion/?service=rss
+https://www.thehindu.com/opinion/editorial/?service=rss
+https://www.hindustantimes.com/feeds/rss/opinion/rssfeed.xml
