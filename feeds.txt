@@ -77,3 +77,6 @@ https://www.thehindu.com/opinion/editorial/?service=rss
 https://www.hindustantimes.com/feeds/rss/opinion/rssfeed.xml
 https://feeds.feedburner.com/Consortiumnewscom
 https://evilgodfahim.github.io/org/daily_feed.xml
+https://www.eiu.com/n/feed/
+https://www.lowyinstitute.org/the-interpreter/rss.xml 
+https://feeds.feedburner.com/AtlanticInternational
