@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 filter_feed.py - simplified version with automatic GitHub titles fetch
+Enhanced with robust error handling and retry logic
 """
 
 import os
@@ -15,6 +16,9 @@ from sentence_transformers import SentenceTransformer
 from sklearn.cluster import DBSCAN
 from sklearn.metrics.pairwise import cosine_similarity
 import requests
+import time
+from urllib.error import URLError
+from http.client import RemoteDisconnected
 
 # ===== CONFIG =====
 FEEDS_FILE = "feeds.txt"
@@ -38,10 +42,13 @@ MAX_OUTPUT_ITEMS = 100
 DBSCAN_EPS = 0.25
 DBSCAN_MIN_SAMPLES = 1
 
-# ---- New single control parameter (0.0 lenient -> 1.0 strict) ----
-FILTER_STRENGTH = 0.60  # default moderate
-DEBUG_FILTER = False    # set True to print per-article debug info
-# -------------------------------------------------------------------
+FILTER_STRENGTH = 0.60
+DEBUG_FILTER = False
+
+# Network retry settings
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
+REQUEST_TIMEOUT = 30  # seconds
 
 
 # ===== UTIL =====
@@ -79,19 +86,90 @@ def domain_from_url(url: str) -> str:
         pass
     return ""
 
+# ===== ROBUST NETWORK FUNCTIONS =====
+def fetch_with_retry(url: str, timeout: int = REQUEST_TIMEOUT, max_retries: int = MAX_RETRIES):
+    """Fetch URL with retry logic and exponential backoff."""
+    for attempt in range(max_retries):
+        try:
+            print(f"[fetch] attempt {attempt + 1}/{max_retries} for {url[:50]}...")
+            response = requests.get(
+                url, 
+                timeout=timeout,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (compatible; FeedBot/1.0)',
+                    'Accept': 'application/rss+xml, application/xml, text/xml, */*'
+                }
+            )
+            response.raise_for_status()
+            return response
+        except (requests.exceptions.RequestException, RemoteDisconnected, URLError) as e:
+            print(f"[fetch] attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                delay = RETRY_DELAY * (2 ** attempt)  # exponential backoff
+                print(f"[fetch] retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                print(f"[fetch] all retries exhausted for {url}")
+                return None
+    return None
+
+def parse_feed_with_retry(url: str, max_retries: int = MAX_RETRIES):
+    """Parse RSS feed with retry logic."""
+    for attempt in range(max_retries):
+        try:
+            print(f"[parse_feed] attempt {attempt + 1}/{max_retries} for {url[:50]}...")
+            
+            # Configure feedparser with custom headers
+            feedparser.USER_AGENT = 'Mozilla/5.0 (compatible; FeedBot/1.0)'
+            
+            # Try parsing with timeout
+            feed = feedparser.parse(
+                url,
+                request_headers={
+                    'User-Agent': 'Mozilla/5.0 (compatible; FeedBot/1.0)',
+                    'Accept': 'application/rss+xml, application/xml, text/xml, */*'
+                }
+            )
+            
+            # Check if feed was successfully parsed
+            if hasattr(feed, 'bozo') and feed.bozo == 1:
+                error = getattr(feed, 'bozo_exception', None)
+                if isinstance(error, (RemoteDisconnected, URLError)):
+                    raise error
+                # Other parsing errors we can tolerate
+                print(f"[parse_feed] warning: feed parse error (continuing): {error}")
+            
+            return feed
+            
+        except (RemoteDisconnected, URLError, Exception) as e:
+            print(f"[parse_feed] attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                delay = RETRY_DELAY * (2 ** attempt)
+                print(f"[parse_feed] retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                print(f"[parse_feed] all retries exhausted for {url}")
+                return None
+    return None
+
 # ===== FETCH TITLES FROM GITHUB =====
 def fetch_reference_titles():
     try:
         print("[fetch_reference_titles] fetching titles.txt from GitHub...")
-        r = requests.get(REFERENCE_URL, timeout=15)
-        if r.status_code == 200:
+        response = fetch_with_retry(REFERENCE_URL, timeout=15)
+        
+        if response and response.status_code == 200:
             with open(REFERENCE_FILE, "w", encoding="utf-8") as f:
-                f.write(r.text)
+                f.write(response.text)
             print("[fetch_reference_titles] ✓ downloaded titles.txt")
         else:
-            print(f"[fetch_reference_titles] ERROR: status {r.status_code}")
+            print(f"[fetch_reference_titles] ERROR: failed to fetch titles")
+            if os.path.exists(REFERENCE_FILE):
+                print(f"[fetch_reference_titles] using cached {REFERENCE_FILE}")
     except Exception as e:
         print(f"[fetch_reference_titles] ERROR: {e}")
+        if os.path.exists(REFERENCE_FILE):
+            print(f"[fetch_reference_titles] using cached {REFERENCE_FILE}")
 
 # ===== LOAD REFERENCE TITLES =====
 def load_reference_titles():
@@ -139,7 +217,7 @@ def main():
         raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
     model = SentenceTransformer(model_name)
 
-    # ---- Compute/load reference embeddings (robust: keyed by titles file hash) ----
+    # Compute/load reference embeddings
     ref_embeddings = None
     if ref_titles:
         def _titles_hash(titles_list):
@@ -151,7 +229,6 @@ def main():
         titles_hash = _titles_hash(ref_titles)
         hash_file = REF_EMB_NPY + ".sha256"
 
-        # if numpy cache exists and hash file exists and matches, load cache
         if os.path.exists(REF_EMB_NPY) and os.path.exists(hash_file):
             try:
                 with open(hash_file, "r", encoding="utf-8") as hf:
@@ -170,7 +247,6 @@ def main():
             except Exception as e:
                 print(f"[ref_emb] failed reading hash file: {e}")
 
-        # If embeddings still None, compute and save + store hash
         if ref_embeddings is None:
             try:
                 print("[ref_emb] computing reference embeddings...")
@@ -188,9 +264,19 @@ def main():
     with open(FEEDS_FILE, "r", encoding="utf-8") as f:
         feed_urls = [l.strip() for l in f if l.strip()]
 
+    # Parse feeds with retry logic
     feed_articles = []
+    failed_feeds = []
+    
     for url in feed_urls:
-        feed = feedparser.parse(url)
+        feed = parse_feed_with_retry(url)
+        
+        if feed is None:
+            print(f"[main] FAILED to parse feed: {url}")
+            failed_feeds.append(url)
+            continue
+            
+        entries_count = 0
         for e in feed.entries:
             if getattr(e, "title", None) and getattr(e, "link", None):
                 feed_articles.append({
@@ -199,76 +285,61 @@ def main():
                     "published": getattr(e, "published", "") or getattr(e, "updated", ""),
                     "feed_source": url
                 })
+                entries_count += 1
+        
+        print(f"[main] extracted {entries_count} articles from {url[:50]}...")
+        time.sleep(0.5)  # Be nice to servers
+
+    print(f"[main] successfully parsed {len(feed_urls) - len(failed_feeds)}/{len(feed_urls)} feeds")
+    if failed_feeds:
+        print(f"[main] failed feeds: {failed_feeds}")
 
     if not feed_articles:
         print("[main] no feed articles found; exiting")
         return
 
     # Encode articles
+    print(f"[main] encoding {len(feed_articles)} articles...")
     article_emb = model.encode([a["title"] for a in feed_articles], convert_to_numpy=True)
 
-    # ===== HYBRID FILTER (ENHANCED) =====
-    # Single-parameter control: FILTER_STRENGTH in [0.0, 1.0]
-    # This block computes richer semantic signals (top-k ref similarity, ref-coherence)
-    # and a shallowness penalty, then makes a single composite decision.
+    # Enhanced hybrid filter
     candidates = []
+    TOP_K = 5
 
-    TOP_K = 5  # number of top reference titles to inspect per article (kept small)
     for idx, a in enumerate(feed_articles):
         t = a["title"]
         pat = calculate_analytical_score(t)
-
-        # Article embedding (numpy vector)
         art_emb = article_emb[idx]
 
-        # If we have reference embeddings, compute similarity signals
         max_sim = 0.0
         mean_topk = 0.0
-        ref_coherence = 0.0  # how similar the top-k refs are to each other
-        sims = None
+        ref_coherence = 0.0
+        
         if ref_embeddings is not None and ref_embeddings.size > 0:
-            # sims: similarity between this article and every ref title
             sims = cosine_similarity([art_emb], ref_embeddings)[0]
-            # primary signals
             max_sim = float(np.max(sims))
-            # top-k mean similarity
-            # handle case when there are fewer refs than TOP_K
+            
             k = min(TOP_K, sims.shape[0])
-            topk_idx = np.argsort(sims)[-k:][::-1]  # indices of top-k (desc)
+            topk_idx = np.argsort(sims)[-k:][::-1]
             topk_vals = sims[topk_idx] if topk_idx.size > 0 else np.array([max_sim])
             mean_topk = float(np.mean(topk_vals)) if topk_vals.size > 0 else max_sim
 
-            # ref coherence: average pairwise cosine among the selected top-k reference embeddings
             if len(topk_idx) > 1:
                 topk_embs = ref_embeddings[topk_idx]
-                # pairwise similarity matrix
                 pair_mat = cosine_similarity(topk_embs)
-                # take upper triangle (excluding diagonal) mean
                 n = pair_mat.shape[0]
                 if n > 1:
                     upper_ix = np.triu_indices(n, k=1)
-                    # protect against empty upper triangle
                     if upper_ix[0].size > 0:
                         ref_coherence = float(np.mean(pair_mat[upper_ix]))
-                    else:
-                        ref_coherence = 0.0
-                else:
-                    ref_coherence = 0.0
-            else:
-                ref_coherence = 0.0
 
-        # ----- pattern / shallowness heuristics -----
-        # Normalize pattern score to [0,1] (pattern score expected small int)
         norm_pat = max(0.0, min(1.0, pat / 6.0))
 
-        # Shallow/clickbait heuristics (penalty between 0..1)
         shallow_penalty = 0.0
         if t:
             tl = t.strip()
-            # All-caps very likely clickbaity / low quality
             if tl.isupper():
                 shallow_penalty += 0.45
-            # Exclamation mark or suspicious phrases
             if "!" in tl:
                 shallow_penalty += 0.25
             low_quality_phrases = ["you won't believe", "won't believe", "shocking", "what happened next",
@@ -276,35 +347,21 @@ def main():
             tl_lower = tl.lower()
             if any(p in tl_lower for p in low_quality_phrases):
                 shallow_penalty += 0.35
-            # Short listicles like "10 ways ..." are often shallow
             if re.search(r'^\d+\s+(ways|things|reasons)\b', tl_lower):
                 shallow_penalty += 0.20
         shallow_penalty = min(1.0, shallow_penalty)
 
-        # ----- Composite semantic signal -----
-        # We combine: max_sim (most important), mean_topk (robustness), ref_coherence (topic sanity),
-        # and normalized pattern score (small positive boost).
-        # Fixed internal weights produce a stable composite score in [0,1].
         w_max = 0.60
         w_mean = 0.20
         w_coh = 0.10
         w_pat = 0.10
         composite = (w_max * max_sim) + (w_mean * mean_topk) + (w_coh * ref_coherence) + (w_pat * norm_pat)
+        composite = composite * (1.0 - 0.65 * shallow_penalty)
 
-        # Apply shallowness penalty: reduce composite
-        composite = composite * (1.0 - 0.65 * shallow_penalty)  # penalize up to ~65%
-
-        # ----- Adaptive acceptance threshold derived from FILTER_STRENGTH -----
-        # threshold ranges roughly from 0.35 (lenient) to 0.8 (strict)
         adaptive_threshold = 0.35 + FILTER_STRENGTH * 0.45
-
-        # Minimum semantic requirement: ensure not accepting total noise when Filter is strict
-        min_sim_required = 0.20 + FILTER_STRENGTH * 0.45  # range ~0.20..0.65
-
-        # Final accept logic:
-        # - Must have composite >= adaptive_threshold
-        # - And the raw max_sim must be at least min_sim_required OR the pattern score must be high enough
-        pat_thresh = 1 + int(FILTER_STRENGTH * 4)  # maps 0..1 to 1..5
+        min_sim_required = 0.20 + FILTER_STRENGTH * 0.45
+        pat_thresh = 1 + int(FILTER_STRENGTH * 4)
+        
         accept = False
         if composite >= adaptive_threshold:
             if max_sim >= min_sim_required or pat >= pat_thresh:
@@ -317,7 +374,6 @@ def main():
                   f"        composite={composite:.3f} adaptive_th={adaptive_threshold:.3f} "
                   f"min_sim_req={min_sim_required:.3f} accept={accept}")
 
-        # If accepted, prepare meta as before
         if accept:
             meta = a.copy()
             meta.update({
@@ -327,13 +383,14 @@ def main():
                 "timestamp": timestamp_from_pubdate(a.get("published",""))
             })
             candidates.append(meta)
-    # ===== END ENHANCED HYBRID FILTER =====
+
+    print(f"[main] {len(candidates)} candidates after filter")
 
     if not candidates:
         print("[main] no candidates passed filter; exiting")
         return
 
-    # ===== TIME CUTOFF =====
+    # Time cutoff
     cutoff_ts = int((datetime.now(timezone.utc) - timedelta(hours=CUTOFF_HOURS)).timestamp())
     candidates = [c for c in candidates if c["timestamp"] >= cutoff_ts]
     print(f"[main] {len(candidates)} candidates after {CUTOFF_HOURS}h cutoff")
@@ -342,7 +399,7 @@ def main():
         print("[main] no recent candidates; exiting")
         return
 
-    # ===== CLUSTERING (DBSCAN) =====
+    # Clustering
     X = np.vstack([c["embedding"] for c in candidates])
     clustering = DBSCAN(eps=DBSCAN_EPS, min_samples=DBSCAN_MIN_SAMPLES, metric="cosine").fit(X)
     labels = clustering.labels_
@@ -354,7 +411,7 @@ def main():
     for c in candidates:
         clusters.setdefault(c["cluster"], []).append(c)
 
-    # ===== CLUSTER SCORING =====
+    # Cluster scoring
     def cluster_score(cluster):
         size = len(cluster)
         avg_pat = sum(x["pattern_score"] for x in cluster) / max(1, size)
@@ -368,15 +425,12 @@ def main():
         cluster_list.append({"label": lbl, "items": items, "score": cluster_score(items)})
     cluster_list.sort(key=lambda x: x["score"], reverse=True)
 
-    # ===== DIVERSITY & FINAL SELECTION =====
-    # New logic: pick at most ONE representative per cluster to avoid near-duplicate articles.
-    # Helper to compute per-item score (same formula used previously)
+    # Diversity & final selection
     def compute_item_score(it):
         recency_hours = max(1, (datetime.now(timezone.utc).timestamp() - it["timestamp"]) / 3600.0)
         recency_score = 1.0 / (1.0 + recency_hours / 24.0)
         return it["pattern_score"] * 2.0 + it["sim_to_refs"] * 5.0 + recency_score
 
-    # Build a list of cluster representatives
     cluster_reps = []
     for cl in cluster_list:
         items = cl["items"]
@@ -388,17 +442,19 @@ def main():
                 best_score = sc
                 best_item = it
         if best_item is not None:
-            cluster_reps.append({"label": cl["label"], "rep": best_item, "cluster_score": cl["score"], "rep_item_score": best_score})
+            cluster_reps.append({
+                "label": cl["label"], 
+                "rep": best_item, 
+                "cluster_score": cl["score"], 
+                "rep_item_score": best_score
+            })
 
-    # Sort cluster representatives by cluster_score (priority), then rep_item_score
     cluster_reps.sort(key=lambda x: (x["cluster_score"], x["rep_item_score"]), reverse=True)
 
-    # Select up to MAX_OUTPUT_ITEMS representatives (one per cluster)
     final = []
     seen_titles = set()
     for crep in cluster_reps:
         art = crep["rep"]
-        # avoid exact duplicate titles if any
         if art["title"] in seen_titles:
             continue
         final.append(art)
@@ -406,17 +462,15 @@ def main():
         if len(final) >= MAX_OUTPUT_ITEMS:
             break
 
-    # If for some reason final is empty (shouldn't happen), fall back to first items from cluster_list
     if not final:
         for cl in cluster_list[:MAX_OUTPUT_ITEMS]:
             final.append(cl["items"][0])
 
     print(f"[main] selected {len(final)} final articles")
 
-    # ===== APPEND MODE: KEEP LAST 500 ITEMS =====
+    # Append mode: keep last 500 items
     print("[main] appending to existing filtered.xml (max 500 items)")
 
-    # Load existing items if file exists
     existing_items = []
     if os.path.exists(OUTPUT_FILE):
         try:
@@ -433,17 +487,14 @@ def main():
         except Exception as e:
             print(f"[main] warning: failed to parse existing xml: {e}")
 
-    # Merge new (final) + existing, deduplicate by normalized link or title
     seen = set()
     merged = []
 
     def _norm_key(title: str, link: str) -> str:
-        """Return normalized dedupe key: prefer link, otherwise normalized title."""
         if link:
             return link.strip()
         return re.sub(r"\s+", " ", (title or "").strip().lower())
 
-    # Add new items first (so newest are first)
     for art in final:
         key = _norm_key(art.get("title",""), art.get("link",""))
         if not key:
@@ -453,11 +504,12 @@ def main():
             merged.append({
                 "title": art.get("title",""),
                 "link": art.get("link",""),
-                "pubDate": datetime.utcfromtimestamp(art.get("timestamp", int(datetime.now(timezone.utc).timestamp()))).strftime("%a, %d %b %Y %H:%M:%S GMT"),
+                "pubDate": datetime.utcfromtimestamp(
+                    art.get("timestamp", int(datetime.now(timezone.utc).timestamp()))
+                ).strftime("%a, %d %b %Y %H:%M:%S GMT"),
                 "source": art.get("feed_source", "")
             })
 
-    # Append older existing items if they are not duplicates
     for art in existing_items:
         key = _norm_key(art.get("title",""), art.get("link",""))
         if not key:
@@ -466,12 +518,11 @@ def main():
             seen.add(key)
             merged.append(art)
 
-    # Keep only newest 500 items
     MAX_ARCHIVE_ITEMS = 500
     merged = merged[:MAX_ARCHIVE_ITEMS]
     print(f"[main] merged total items after dedupe: {len(merged)} (capped at {MAX_ARCHIVE_ITEMS})")
 
-    # Write back clean RSS XML (new file replacing the old, but content is merged)
+    # Write XML
     root = ET.Element("rss", version="2.0")
     channel = ET.SubElement(root, "channel")
     ET.SubElement(channel, "title").text = "Filtered Feed"
