@@ -1,6 +1,13 @@
 https://asiatimes.com/feed/
 https://politepaul.com/fd/TefnRxuxFzO0.xml
 https://evilgodfahim.github.io/csis/rss.xml
+https://politepaul.com/fd/M8QukWfUPWR4.xml
+https://politepaul.com/fd/BI4f9BiCvoed.xml
+https://www.thecipherbrief.com/feed
+https://www.bellingcat.com/feed/
+https://rusi.org/rss/latest-publications.xml
+https://www.spytalk.co/feed/
+https://www.defenseone.com/rss/all/
 https://politepaul.com/fd/9RMAFvRRGLst.xml
 https://www.globalpolicyjournal.com/blog/author/%2A/feed
 https://www.e-ir.info/feed/
