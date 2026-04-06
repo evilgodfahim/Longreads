@@ -1,6 +1,7 @@
 https://asiatimes.com/feed/
 https://politepaul.com/fd/TefnRxuxFzO0.xml
 https://evilgodfahim.github.io/csis/rss.xml
+https://evilgodfahim.github.io/intop/filtered.xml
 https://politepaul.com/fd/M8QukWfUPWR4.xml
 https://politepaul.com/fd/BI4f9BiCvoed.xml
 https://www.thecipherbrief.com/feed
