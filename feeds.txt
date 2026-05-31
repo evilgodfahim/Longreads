@@ -47,7 +47,7 @@ https://geopoliticaleconomy.substack.com/feed
 https://www.newgeopolitics.org/feed/
 https://ipdefenseforum.com/feed/
 https://www.nytimes.com/svc/collections/v1/publish/
-http://www.irinnews.org/irin.xml
+https://www.thenewhumanitarian.org/rss/all.xml
 https://feeds.feedburner.com/LongWarJournalSiteWide
 https://gulfif.org/feed/
 https://ecfr.eu/feed/
